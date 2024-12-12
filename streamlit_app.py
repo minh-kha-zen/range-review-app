@@ -2,8 +2,37 @@ import os
 import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
+from hierarchy_identification_agent import identify_optimization_levels_with_ai  # Importing the agent
 
 st.set_page_config(layout="wide")
+
+FEEDBACK_FILE = "feedback.csv"
+
+# Helper function to save feedback
+def save_feedback(feedback_data):
+    """
+    Save feedback to a CSV file.
+
+    Args:
+        feedback_data (dict): A dictionary containing feedback information.
+    """
+    # Format logged text to replace line breaks with a space or a placeholder
+    feedback_data['Logged Text'] = feedback_data['Logged Text'].replace('\n', ' ')  # Replace line breaks with a space
+
+    if not os.path.exists(FEEDBACK_FILE):
+        pd.DataFrame([feedback_data]).to_csv(FEEDBACK_FILE, index=False)
+    else:
+        feedback_df = pd.read_csv(FEEDBACK_FILE)
+        feedback_df = pd.concat([feedback_df, pd.DataFrame([feedback_data])], ignore_index=True)
+        feedback_df.to_csv(FEEDBACK_FILE, index=False)
+
+# Initialize session state variables
+if 'optimization_df' not in st.session_state:
+    st.session_state.optimization_df = None
+if 'logged_text' not in st.session_state:
+    st.session_state.logged_text = ""
+if 'feedback' not in st.session_state:
+    st.session_state.feedback = ""
 
 st.title("Range Review Demo")
 st.write("Demo workflow for LLM-based range review")
@@ -27,7 +56,7 @@ st.write("Sales Data")
 st.write(sales.head())
 
 st.write("Hierarchy Data")
-st.write(hierarchy.head())
+st.write(hierarchy.head(10))
 
 st.markdown("---")  # This adds a horizontal divider line
 
@@ -302,3 +331,109 @@ table_data = table_data.drop(columns=['margin_prev_year', 'cum_margin_share', 'm
 # Display the table
 st.header("Detailed Data Table")
 st.dataframe(table_data)
+
+st.markdown("---")  # Divider
+
+# Input for Sous-Familles
+st.header("4. Model Hierarchy Identification Agent")
+st.write("Enter a Sous-Famille to identify the optimization level.")
+sous_famille_input = st.text_input("Enter a Sous-Famille")
+
+example_models = attributes[attributes['key'] == 'Modèle']['value'].unique().tolist()
+
+
+if 'feedback' not in st.session_state:
+    st.session_state.feedback = ""
+
+if 'validation_status' not in st.session_state:
+    st.session_state.validation_status = ""
+
+if st.button("Identify Optimization Levels"):
+    # Initialize sous_famille to None
+    sous_famille = None
+    
+    # Check if user provided input
+    if sous_famille_input.strip() == "":
+        st.error("Please enter a Sous-Famille.")
+    else:
+        # Assign the input to sous_famille
+        sous_famille = sous_famille_input.strip()
+        api_key = os.getenv("OPENAI_API_KEY")
+        
+        if not api_key:
+            st.error("OPENAI_API_KEY not found in environment variables.")
+        else:
+            with st.spinner("Identifying optimization levels..."):
+                try:
+                    # Pass the single Sous-Famille to the function
+                    optimization_df, logged_text = identify_optimization_levels_with_ai(hierarchy, [sous_famille], api_key, example_models)
+                    
+                    # Update session state
+                    st.session_state.optimization_df = optimization_df
+                    st.session_state.logged_text = logged_text
+                    st.session_state.feedback = ""
+                    st.session_state.validation_status = ""
+                    
+                    # Display success and output
+                    st.success("Optimization levels identified successfully.")
+                    st.dataframe(optimization_df)
+
+                except Exception as e:
+                    st.error(f"An error occurred: {e}")
+
+# Display Approve and Reject buttons only if optimization_df is available
+if st.session_state.optimization_df is not None:
+    optimization_df = st.session_state.optimization_df
+    logged_text = st.session_state.logged_text
+
+    # Assume there's only one Sous-Famille
+    row = optimization_df.iloc[0]
+
+    # Display the logged text in grey with a border
+    if st.session_state.logged_text:  # Only display if logged_text exists in session state
+        st.markdown("**Logged Text:**")
+        st.markdown(
+            f"""<div style='background-color: #f0f2f6; padding: 15px; border-radius: 5px; border: 1px solid #e0e0e0; color: black;'>
+            {st.session_state.logged_text.replace('\n', '<br>')}
+            </div>""", 
+            unsafe_allow_html=True
+        )
+
+    # Feedback input
+    st.markdown("---")
+    st.header("Provide Your Feedback")
+    feedback = st.text_area("Your Feedback", value=st.session_state.feedback, height=150, key="feedback_input")
+
+    # Approval Buttons in separate rows with different colors
+    approve_clicked = st.button(
+        "✓ Approve",
+        key="approve_button",
+        type="primary",  # This will give it a colorful appearance
+    )
+
+    reject_clicked = st.button(
+        "✗ Reject",
+        key="reject_button",
+        type="secondary",  # This gives it a more neutral appearance
+    )
+
+    if approve_clicked or reject_clicked:
+        decision = "Approved" if approve_clicked else "Rejected"
+        if feedback.strip() == "":
+            st.error("Please provide your feedback before submitting.")
+        else:
+            feedback_data = {
+                "Sous-Famille": row["Sous-Famille"],
+                "Optimization Level Name": row["Optimization Level Name"],
+                "Optimization Level ID": row["Optimization Level ID"],
+                "Feedback": decision,
+                "Logged Text": logged_text,
+                "Your Feedback": feedback.strip()
+            }
+            save_feedback(feedback_data)
+            st.session_state.validation_status = "success"
+            st.session_state.feedback = ""
+            st.session_state.optimization_df = None
+            st.session_state.logged_text = ""
+            st.success(f"Feedback for '{row['Sous-Famille']}' has been saved successfully.")
+        
