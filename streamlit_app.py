@@ -366,7 +366,7 @@ if st.button("Identify Optimization Levels"):
             with st.spinner("Identifying optimization levels..."):
                 try:
                     # Pass the single Sous-Famille to the function
-                    optimization_df, logged_text = identify_optimization_levels_with_ai(hierarchy, [sous_famille], api_key, example_models)
+                    optimization_df, logged_text = identify_optimization_levels_with_ai(hierarchy, sous_famille, api_key, example_models)
                     
                     # Update session state
                     st.session_state.optimization_df = optimization_df
