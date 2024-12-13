@@ -2,14 +2,16 @@ import os
 import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
-from hierarchy_identification_agent import identify_optimization_levels_with_ai  # Importing the agent
+from hierarchy_identification_agent import identify_optimization_levels
+from model_extraction_agent import extract_models_for_sub_family  # Importing the new extraction agent
 
 st.set_page_config(layout="wide")
 
-FEEDBACK_FILE = "feedback.csv"
+FEEDBACK_FILE_HIERARCHY = "feedback_hierarchy.csv"
+FEEDBACK_FILE_MODEL = "feedback_model.csv"
 
 # Helper function to save feedback
-def save_feedback(feedback_data):
+def save_feedback(feedback_data, feedback_file):
     """
     Save feedback to a CSV file.
 
@@ -19,12 +21,13 @@ def save_feedback(feedback_data):
     # Format logged text to replace line breaks with a space or a placeholder
     feedback_data['Logged Text'] = feedback_data['Logged Text'].replace('\n', ' ')  # Replace line breaks with a space
 
-    if not os.path.exists(FEEDBACK_FILE):
-        pd.DataFrame([feedback_data]).to_csv(FEEDBACK_FILE, index=False)
+    if not os.path.exists(feedback_file):
+        pd.DataFrame([feedback_data]).to_csv(feedback_file, index=False)
     else:
-        feedback_df = pd.read_csv(FEEDBACK_FILE)
+        feedback_df = pd.read_csv(feedback_file)
         feedback_df = pd.concat([feedback_df, pd.DataFrame([feedback_data])], ignore_index=True)
-        feedback_df.to_csv(FEEDBACK_FILE, index=False)
+        feedback_df.to_csv(feedback_file, index=False)
+
 
 # Initialize session state variables
 if 'optimization_df' not in st.session_state:
@@ -33,6 +36,10 @@ if 'logged_text' not in st.session_state:
     st.session_state.logged_text = ""
 if 'feedback' not in st.session_state:
     st.session_state.feedback = ""
+if 'model_df' not in st.session_state:
+    st.session_state.model_df = None
+if 'model_logged_text' not in st.session_state:
+    st.session_state.model_logged_text = ""
 
 st.title("Range Review Demo")
 st.write("Demo workflow for LLM-based range review")
@@ -48,23 +55,16 @@ inventory = pd.read_parquet(os.path.join(BASE_PATH, "inventory.parquet"))
 attributes = pd.read_parquet(os.path.join(BASE_PATH, "attributes.parquet"))
 
 st.header("1. Data Preview")
-
-st.write("Master Data") 
+st.write("Master Data")
 st.write(master.head())
-
 st.write("Sales Data")
 st.write(sales.head())
-
 st.write("Hierarchy Data")
 st.write(hierarchy.head(10))
-
-st.markdown("---")  # This adds a horizontal divider line
-
+st.markdown("---")
 st.header("2. Data Preparation")
-
 # Create columns for filters
 col1, col2, col3, col4 = st.columns(4)
-
 with col1:
     # Date filter for start date
     start_date = st.date_input("Select start date", value=pd.to_datetime("2024-01-01"))
@@ -334,7 +334,8 @@ st.dataframe(table_data)
 
 st.markdown("---")  # Divider
 
-# Input for Sous-Familles
+# ------------------ Chapter 4: Model Hierarchy Identification Agent ------------------
+
 st.header("4. Model Hierarchy Identification Agent")
 st.write("Enter a Sous-Famille to identify the optimization level.")
 sous_famille_input = st.text_input("Enter a Sous-Famille")
@@ -366,7 +367,7 @@ if st.button("Identify Optimization Levels"):
             with st.spinner("Identifying optimization levels..."):
                 try:
                     # Pass the single Sous-Famille to the function
-                    optimization_df, logged_text = identify_optimization_levels_with_ai(hierarchy, sous_famille, api_key, example_models)
+                    optimization_df, logged_text = identify_optimization_levels(hierarchy, sous_famille, api_key, example_models)
                     
                     # Update session state
                     st.session_state.optimization_df = optimization_df
@@ -430,10 +431,118 @@ if st.session_state.optimization_df is not None:
                 "Logged Text": logged_text,
                 "Your Feedback": feedback.strip()
             }
-            save_feedback(feedback_data)
+            save_feedback(feedback_data, FEEDBACK_FILE_HIERARCHY)
             st.session_state.validation_status = "success"
             st.session_state.feedback = ""
             st.session_state.optimization_df = None
             st.session_state.logged_text = ""
             st.success(f"Feedback for '{row['Sous-Famille']}' has been saved successfully.")
+
+# ------------------ Chapter 5: Model Extraction Agent ------------------
+
+st.markdown("---")  # Divider
+
+st.header("5. Model Extraction Agent")
+st.write("Enter a Sous-Famille to extract all models.")
+sous_famille_input_model = st.text_input("Enter a Sous-Famille for Model Extraction")
+
+extract_button = st.button("Extract Models")
+
+if extract_button:
+    # Initialize sous_famille_model to None
+    sous_famille_model = None
+    
+    # Check if user provided input
+    if sous_famille_input_model.strip() == "":
+        st.error("Please enter a Sous-Famille.")
+    else:
+        # Assign the input to sous_famille_model
+        sous_famille_model = sous_famille_input_model.strip()
+        api_key = os.getenv("OPENAI_API_KEY")
         
+        if not api_key:
+            st.error("OPENAI_API_KEY not found in environment variables.")
+        else:
+            with st.spinner("Extracting models..."):
+                try:
+                    # Pass the single Sous-Famille to the extraction function
+                    model_df, model_logged_text = extract_models_for_sub_family(hierarchy, sous_famille_model, api_key, example_models)
+                    
+                    # Update session state
+                    st.session_state.model_df = model_df
+                    st.session_state.model_logged_text = model_logged_text
+                    
+                    # Display success and output
+                    st.success("Models extracted successfully.")
+                    st.dataframe(model_df)
+
+                except Exception as e:
+                    st.error(f"An error occurred: {e}")
+
+# Display Logged Text and Feedback for Model Extraction only if model_df is available
+if st.session_state.model_df is not None and not st.session_state.model_df.empty:
+    model_df = st.session_state.model_df
+    model_logged_text = st.session_state.model_logged_text
+
+    # Assume there's only one Sous-Famille
+    model_row = model_df.iloc[0]
+
+    # Display the logged text in grey with a border
+    if st.session_state.model_logged_text:  # Only display if model_logged_text exists in session state
+        st.markdown("**Logged Text:**")
+        st.markdown(
+            f"""<div style='background-color: #f0f2f6; padding: 15px; border-radius: 5px; border: 1px solid #e0e0e0; color: black;'>
+            {st.session_state.model_logged_text.replace('\n', '<br>')}
+            </div>""", 
+            unsafe_allow_html=True
+        )
+
+    # Feedback input
+    st.markdown("---")
+    st.header("Provide Your Feedback for Model Extraction")
+    model_feedback = st.text_area("Your Feedback", value=st.session_state.feedback, height=150, key="model_feedback_input")
+
+    # Approval Buttons in separate rows with different colors
+    model_approve_clicked = st.button(
+        "✓ Approve",
+        key="model_approve_button",
+        type="primary",  # This will give it a colorful appearance
+    )
+
+    model_reject_clicked = st.button(
+        "✗ Reject",
+        key="model_reject_button",
+        type="secondary",  # This gives it a more neutral appearance
+    )
+
+    if model_approve_clicked or model_reject_clicked:
+        model_decision = "Approved" if model_approve_clicked else "Rejected"
+        if model_feedback.strip() == "":
+            st.error("Please provide your feedback before submitting.")
+        else:
+            feedback_data = {
+                "Sous-Famille": model_row["Sous-Famille"],
+                "model_name": model_row["model_name"],
+                "model_level": model_row["model_level"],
+                "model_level_name": model_row["model_level_name"],
+                "Feedback": model_decision,
+                "Logged Text": model_logged_text,
+                "Your Feedback": model_feedback.strip()
+            }
+            save_feedback(feedback_data, FEEDBACK_FILE_MODEL)
+            st.session_state.validation_status = "success"
+            st.session_state.feedback = ""
+            st.session_state.model_df = None
+            st.session_state.model_logged_text = ""
+            st.success(f"Feedback for model '{model_row['model_name']}' in '{model_row['Sous-Famille']}' has been saved successfully.")
+else:
+    # If no models were extracted, display the logged text
+    st.warning("No models were extracted. Please check the input or the hierarchy data.")
+    if st.session_state.model_logged_text:  # Display logged text if it exists
+        st.markdown("**Logged Text:**")
+        st.markdown(
+            f"""<div style='background-color: #f0f2f6; padding: 15px; border-radius: 5px; border: 1px solid #e0e0e0; color: black;'>
+            {st.session_state.model_logged_text.replace('\n', '<br>')}
+            </div>""", 
+            unsafe_allow_html=True
+        )
