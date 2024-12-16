@@ -161,14 +161,9 @@ def prepare_table_data(
         # Fill NaN for models without previous year data
         table_data['yoy_margin_change'] = table_data['yoy_margin_change'].fillna("N/A")
 
-    # Drop columns that are not needed
-    columns_to_drop = [
-        'margin_share',
-        'cum_margin_share',
-        'margin_prev_year',
-    ]
-    table_data.drop(columns=columns_to_drop, inplace=True)
-
+    # 
+    table_data['Total Margin'] = '€' + (table_data['Total Margin'] / 1_000_000).round(1).astype(str) + 'M'
+    
     # Rename columns at the end
     table_data.rename(columns={
         'name': 'Model Name',
@@ -190,6 +185,16 @@ def prepare_table_data(
     table_data['Total Net Revenue'] = '€' + (table_data['Total Net Revenue'] / 1_000_000).round(1).astype(str) + 'M'
     table_data['Total SKUs'] = table_data['Total SKUs'].astype(str)  # Assuming this is already in the correct format
     table_data['Relative Margin'] = (table_data['Relative Margin'] * 100).round(1).astype(str) + '%'
+
+    # Drop columns that are not needed
+    columns_to_drop = [
+        'margin_share',
+        'cum_margin_share',
+        'margin_prev_year',
+        'Pareto',
+        'Total Quantity'
+    ]
+    table_data.drop(columns=columns_to_drop, inplace=True)
 
     # Return the final table_data
     return table_data

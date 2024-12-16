@@ -445,7 +445,7 @@ else:
 
 st.markdown("---")  # Divider
 
-st.header("6. Collect Metrics for One Sub-Family")
+st.header("6. Collect Insight Metrics for One Sub-Family")
 
 # Dropdown to select a sous-famille
 sous_famille_list = sorted(hierarchy[hierarchy['level_name'] == 'Sous-Famille']['name'].unique().tolist())
@@ -504,7 +504,7 @@ if collect_button:
                 )
                 
                 # Display the table
-                st.success("Model Data collected successfully.")
+                st.success("Insight Data collected successfully.")
                 st.dataframe(table_data_ch6)
                 
             except Exception as e:
