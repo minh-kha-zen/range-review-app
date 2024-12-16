@@ -92,6 +92,10 @@ def create_evaluation_prompt(insights_df: pd.DataFrame, no_of_categories_to_revi
 
     {metrics_context}
 
+    Assign a "Yes" to the "Assessment" only for sub-families that are performing poorly and should be prioritized for evaluation. Sub-families with strong performance metrics should receive a "No".
+
+    Please compile a brief explanation for each sub-family that you have assessed as "Yes", highlighting why you have made this assessment.
+
     Provide your assessment as follows:
     - Sub-Family: [Sub-Family Name]
     - Assessment (Yes/No): [Your assessment here]
