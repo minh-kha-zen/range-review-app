@@ -247,7 +247,7 @@ if st.button("Identify Optimization Levels"):
     sous_famille = None
     
     # Check if user provided input
-    if selected_sous_famille_ch4.strip() != "":
+    if not selected_sous_famille_ch4.strip():
         st.error("Please select a Sous-Famille.")
     else:
         # Assign the input to sous_famille
@@ -445,14 +445,14 @@ else:
 
 st.markdown("---")  # Divider
 
-st.header("6. Run Hierarchy Identification Agent")
+st.header("6. Collect Metrics for One Sub-Family")
 
 # Dropdown to select a sous-famille
 sous_famille_list = sorted(hierarchy[hierarchy['level_name'] == 'Sous-Famille']['name'].unique().tolist())
-selected_sous_famille = st.selectbox("Select a Sous-Famille", options=sous_famille_list)
+selected_sous_famille_ch6 = st.selectbox("Select a Sous-Famille", options=sous_famille_list, key="selected_sous_famille_ch6")
 
-# Button to collect model data
-collect_button = st.button("Collect Model Data", key="collect_model_data_button")
+# Button to insight data
+collect_button = st.button("Collect Insight Data", key="collect_data_button")
 
 if collect_button:
     api_key = os.getenv("OPENAI_API_KEY")
@@ -463,20 +463,22 @@ if collect_button:
             try:
                 # Run identify_optimization_levels to get optimization levels
                 optimization_df, logged_text = identify_optimization_levels(
-                    hierarchy, selected_sous_famille, api_key, example_models
+                    hierarchy, selected_sous_famille_ch6, api_key, example_models
                 )
                 
-                # Get Optimization Level IDs
-                optimization_level_ids = optimization_df['Optimization Level ID'].tolist()
+                # Get model Level IDs
+                model_level_id = optimization_df['Optimization Level ID'].iloc[0]
                 
-                # Filter hierarchy by optimization_level_ids
-                filtered_hierarchy = hierarchy[hierarchy['level'].isin(optimization_level_ids)]
+                # Filter hierarchy by optimization_level_id
+                filtered_hierarchy = hierarchy[hierarchy['level'] == model_level_id]
                 
                 # Filter sales data for the selected sous-famille
-                material_ids = hierarchy[hierarchy['name'] == selected_sous_famille]['material_id']
+                material_ids = hierarchy[hierarchy['name'] == selected_sous_famille_ch6]['material_id']
+
                 filtered_sales_ch6 = sales[
                     (sales['date'] >= start_date) & 
                     (sales['date'] <= end_date) & 
+                    (sales['bundle'] == bundle_option) &
                     (sales['material_id'].isin(material_ids))
                 ]
 
@@ -484,8 +486,11 @@ if collect_button:
                 filtered_sales_previous_year = sales[
                     (sales['date'] >= start_date - pd.DateOffset(years=1)) & 
                     (sales['date'] <= end_date - pd.DateOffset(years=1)) & 
+                    (sales['bundle'] == bundle_option) &
                     (sales['material_id'].isin(material_ids))
                 ]
+
+                sub_family_level_id = 3
                 
                 # Prepare table data using the utility function
                 table_data_ch6 = prepare_table_data(
@@ -493,8 +498,9 @@ if collect_button:
                     hierarchy=hierarchy,
                     sales=filtered_sales_ch6,
                     master=filtered_master,
-                    optimization_level_ids=optimization_level_ids,
-                    previous_year_sales=filtered_sales_previous_year
+                    optimization_level_id=sub_family_level_id,
+                    previous_year_sales=filtered_sales_previous_year,
+                    model_level_id=model_level_id
                 )
                 
                 # Display the table

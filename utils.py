@@ -6,7 +6,8 @@ def prepare_table_data(
     sales, 
     master, 
     optimization_level_id,
-    previous_year_sales=None
+    previous_year_sales,
+    model_level_id=None
 ):
     """
     Prepare the table data for the given sous-famille and optimization levels.
@@ -17,19 +18,11 @@ def prepare_table_data(
         sales (pd.DataFrame): The sales DataFrame.
         master (pd.DataFrame): The master DataFrame.
         optimization_level_id (int): The hierarchy level ID for the optimization.
-        selected_level_name (str): The hierarchy level selected for analysis.
         previous_year_sales (pd.DataFrame, optional): Sales data for the previous year.
 
     Returns:
         pd.DataFrame: The prepared table data with additional metrics.
     """
-
-    # print("material_ids: ", material_ids)
-    # print("hierarchy: ", hierarchy.head())
-    # print("sales: ", sales.head())
-    # print("master: ", master.head())
-    # print("optimization_level_id: ", optimization_level_id)
-    # print("previous_year_sales: ", previous_year_sales.head())
     
     # Filter sales data based on the retrieved material_ids
     filtered_sales = sales[sales['material_id'].isin(material_ids)]
@@ -56,7 +49,7 @@ def prepare_table_data(
         gross_revenue=('gross_revenue', 'sum'),
         latest_intro=('date_of_introduction', 'max')  # Latest introduction date
     ).reset_index()
-    
+
     # Calculate additional metrics
     table_data['relative_margin'] = table_data['margin'] / table_data['net_revenue']
 
@@ -111,27 +104,31 @@ def prepare_table_data(
             how='left'
         )
 
-        next_level = optimization_level_id + 1
-        if next_level in hierarchy['level'].values:
+        if model_level_id is None:
+            lower_level = optimization_level_id + 1
+        else:
+            lower_level = model_level_id
+
+        if lower_level in hierarchy['level'].values:
             current_level_ids = hierarchy[hierarchy['name'] == current_value]['material_id'].unique().tolist()
-            next_level_data = merged_data_with_hierarchy[merged_data_with_hierarchy['material_id'].isin(current_level_ids)]
+            lower_level_data = merged_data_with_hierarchy[merged_data_with_hierarchy['material_id'].isin(current_level_ids)]
 
             # Get the name of the next level
-            next_level_name = hierarchy[hierarchy['level'] == next_level]['level_name'].iloc[0]
+            lower_level_name = hierarchy[hierarchy['level'] == lower_level]['level_name'].iloc[0]
 
-            if next_level_name in next_level_data.columns and not next_level_data.empty:
-                next_level_margins = next_level_data.groupby(next_level_name).agg(
+            if lower_level_name in lower_level_data.columns and not lower_level_data.empty:
+                lower_level_margins = lower_level_data.groupby(lower_level_name).agg(
                     total_margin=('margin', 'sum'),
                     total_revenue=('net_revenue', 'sum')
                 ).reset_index()
 
-                next_level_margins['relative_margin'] = next_level_margins.apply(
+                lower_level_margins['relative_margin'] = lower_level_margins.apply(
                     lambda row: (row['total_margin'] / row['total_revenue'] * 100) if row['total_revenue'] != 0 else 0,
                     axis=1
                 )
 
-                max_margin = next_level_margins['relative_margin'].max()
-                min_margin = next_level_margins['relative_margin'].min()
+                max_margin = lower_level_margins['relative_margin'].max()
+                min_margin = lower_level_margins['relative_margin'].min()
                 return max_margin - min_margin
         return 0
     
@@ -192,6 +189,7 @@ def prepare_table_data(
     table_data['Total Quantity'] = (table_data['Total Quantity'] / 1_000).round(1).astype(str) + 'K'
     table_data['Total Net Revenue'] = '€' + (table_data['Total Net Revenue'] / 1_000_000).round(1).astype(str) + 'M'
     table_data['Total SKUs'] = table_data['Total SKUs'].astype(str)  # Assuming this is already in the correct format
+    table_data['Relative Margin'] = (table_data['Relative Margin'] * 100).round(1).astype(str) + '%'
 
     # Return the final table_data
     return table_data
