@@ -4,6 +4,7 @@ import pandas as pd
 from dotenv import load_dotenv
 from hierarchy_identification_agent import identify_optimization_levels
 from model_extraction_agent import extract_models_for_sub_family  # Importing the new extraction agent
+from utils import prepare_table_data  # Import the utility function
 
 st.set_page_config(layout="wide")
 
@@ -17,6 +18,7 @@ def save_feedback(feedback_data, feedback_file):
 
     Args:
         feedback_data (dict): A dictionary containing feedback information.
+        feedback_file (str): Path to the feedback CSV file.
     """
     # Format logged text to replace line breaks with a space or a placeholder
     feedback_data['Logged Text'] = feedback_data['Logged Text'].replace('\n', ' ')  # Replace line breaks with a space
@@ -27,7 +29,6 @@ def save_feedback(feedback_data, feedback_file):
         feedback_df = pd.read_csv(feedback_file)
         feedback_df = pd.concat([feedback_df, pd.DataFrame([feedback_data])], ignore_index=True)
         feedback_df.to_csv(feedback_file, index=False)
-
 
 # Initialize session state variables
 if 'optimization_df' not in st.session_state:
@@ -114,7 +115,7 @@ total_quantity = f"{grouped_sales['quantity'].sum() / 1_000_000:.1f}M"
 total_net_revenue = f"€{grouped_sales['net_revenue'].sum() / 1_000_000:.1f}M"
 total_margin = f"€{grouped_sales['margin'].sum() / 1_000_000:.1f}M"
 relative_margin = f"{(grouped_sales['margin'].sum() / grouped_sales['net_revenue'].sum() * 100):.1f}%" if grouped_sales['net_revenue'].sum() != 0 else "N/A"
-total_skus = f"{total_skus / 1_000:.1f}K"
+total_skus_display = f"{total_skus / 1_000:.1f}K"
 
 # Create columns for KPIs
 col1, col2, col3, col4, col5 = st.columns(5)
@@ -132,7 +133,7 @@ with col4:
     st.metric(label="Relative Margin", value=relative_margin)
 
 with col5:
-    st.metric(label="Total SKUs", value=total_skus)
+    st.metric(label="Total SKUs", value=total_skus_display)
 
 st.markdown("---")  # This adds a horizontal divider line
 
@@ -176,9 +177,15 @@ for level_name, selected_value in selected_filters.items():
     if selected_value != 'All':
         filtered_data = filtered_data[filtered_data[level_name] == selected_value]
 
+# Create a mapping from level_name to level_id
+level_mapping = hierarchy.set_index('level_name')['level'].to_dict()
+
 # Dropdown for selecting which level to show in the bar chart
 level_options = hierarchy['level_name'].unique().tolist()
-selected_level_name = st.selectbox("Select Level for Chart", options=level_options)
+selected_level_name = st.selectbox("Select Level for Chart", options=level_options, key="selected_level_chart")
+
+# Map selected_level_name to its corresponding level_id
+selected_level_id = level_mapping.get(selected_level_name)
 
 # Group by selected level and calculate total margin
 margin_by_level = filtered_data.groupby(selected_level_name).agg(
@@ -192,142 +199,27 @@ margin_by_level = margin_by_level.sort_values(by='total_margin', ascending=False
 st.header("Total Margin by Hierarchy Level")
 st.bar_chart(margin_by_level.set_index(selected_level_name)['total_margin'], horizontal=True, height=400)
 
-# Join the master data to get the date_of_introduction
-filtered_data = pd.merge(filtered_data, master[['material_id', 'date_of_introduction']], on='material_id', how='left')
-
-# Create a table with one row per bar in the bar chart, including gross_revenue
-table_data = filtered_data.groupby(selected_level_name).agg(
-    margin=('margin', 'sum'),
-    net_revenue=('net_revenue', 'sum'),
-    number_of_skus=('material_id', 'nunique'),  # Count unique material_id for SKU count
-    latest_intro=('date_of_introduction', 'max'),  # Get the latest introduction date
-    gross_revenue=('gross_revenue', 'sum')  # Include gross_revenue in the aggregation
-).reset_index()
-
-# Calculate relative margin as margin/net_revenue
-table_data['relative_margin'] = table_data.apply(
-    lambda row: (row['margin'] / row['net_revenue'] * 100) if row['net_revenue'] != 0 else 0,
-    axis=1
-)
-
-# Calculate avg_discount
-table_data['avg_discount'] = ((table_data['gross_revenue'] - table_data['net_revenue']) / table_data['gross_revenue'] * 100).fillna(0)
-
-# Format avg_discount as a percentage
-table_data['avg_discount'] = table_data['avg_discount'].apply(lambda x: f"{x:.2f}%" if x != 0 else "0.00%")
-
-# Round the margin to a full integer
-table_data['margin'] = table_data['margin'].round().astype(int)
-
-# Format the relative margin as a percentage
-table_data['relative_margin'] = table_data['relative_margin'].apply(lambda x: f"{x:.2f}%" if x != 0 else "0.00%")
-
-# Sort the table by descending margin
-table_data = table_data.sort_values(by='margin', ascending=False)
-
-# Calculate margin share
-total_margin = table_data['margin'].sum()
-table_data['margin_share'] = table_data['margin'] / total_margin * 100
-
-# Calculate cumulative margin share using cumulative sum
-table_data['cum_margin_share'] = table_data['margin_share'].cumsum()
-
-# Determine Pareto flag
-table_data['pareto'] = table_data['cum_margin_share'].apply(lambda x: "Top 80%" if x < 80 else "Bottom 20%")
-
-# Calculate margin spread for the selected level
-def calculate_margin_spread(current_value):
-    # Get current level number from hierarchy
-    current_level = hierarchy[hierarchy['level_name'] == selected_level_name]['level'].iloc[0]
-    
-    # Get next level name from hierarchy
-    next_level = current_level + 1
-    next_level_name = hierarchy[hierarchy['level'] == next_level]['level_name'].iloc[0]
-    
-    # Filter data for the current selection
-    next_level_data = filtered_data[filtered_data[selected_level_name] == current_value]
-    
-    if not next_level_data.empty:
-        # Group by next level and calculate aggregates
-        next_level_margins = next_level_data.groupby(next_level_name).agg(
-            total_margin=('margin', 'sum'),
-            total_revenue=('net_revenue', 'sum')
-        ).reset_index()
-        
-        # Calculate relative margin for each group
-        next_level_margins['relative_margin'] = next_level_margins.apply(
-            lambda row: (row['total_margin'] / row['total_revenue'] * 100) if row['total_revenue'] != 0 else 0,
-            axis=1
-        )
-        
-        # Calculate spread
-        max_margin = next_level_margins['relative_margin'].max()
-        min_margin = next_level_margins['relative_margin'].min()
-        return max_margin - min_margin
-    return 0
-
-# Add margin_spread column
-table_data['margin_spread'] = table_data[selected_level_name].apply(calculate_margin_spread)
-
-# Create filtered sales data for previous year (2023)
-filtered_sales_prev_year = sales[
-    (sales['date'] >= pd.to_datetime("2023-01-01")) & 
-    (sales['date'] <= pd.to_datetime("2023-11-30")) & 
+# Prepare previous year sales data if needed (for YoY calculations)
+previous_year_sales = sales[
+    (sales['date'] >= start_date - pd.DateOffset(years=1)) & 
+    (sales['date'] <= end_date - pd.DateOffset(years=1)) & 
     (sales['bundle'] == bundle_option)
 ]
 
-# Create merged data for previous year (same filters as current year)
-merged_data_prev_year = pd.merge(filtered_master, filtered_sales_prev_year, on='material_id', how='inner')
+# Get list of material ids from filtered data
+material_ids = filtered_data['material_id'].unique().tolist()
 
-# Group previous year data by material_id (same as current year grouping)
-grouped_sales_prev_year = merged_data_prev_year.groupby('material_id').agg(
-    quantity=('quantity', 'sum'),
-    net_revenue=('net_revenue', 'sum'),
-    margin=('margin', 'sum')
-).reset_index()
-
-# Create analysis data for previous year (same process as current year)
-analysis_data_prev_year = pd.merge(
-    grouped_sales_prev_year,
-    hierarchy_pivoted,
-    on='material_id',
-    how='left'
+# Create table data using the utility function
+table_data = prepare_table_data(
+    material_ids=material_ids,
+    hierarchy=hierarchy,
+    sales=filtered_sales,
+    master=filtered_master,
+    optimization_level_id=selected_level_id,
+    previous_year_sales=previous_year_sales
 )
 
-# Apply the same filters as current year
-filtered_data_prev_year = analysis_data_prev_year.copy()
-for level_name, selected_value in selected_filters.items():
-    if selected_value != 'All':
-        filtered_data_prev_year = filtered_data_prev_year[filtered_data_prev_year[level_name] == selected_value]
-
-# Create table data for previous year (same grouping as current year)
-table_data_prev_year = filtered_data_prev_year.groupby(selected_level_name).agg(
-    margin_prev_year=('margin', 'sum')
-).reset_index()
-
-# Join current and previous year data
-table_data = pd.merge(
-    table_data,
-    table_data_prev_year,
-    on=selected_level_name,
-    how='left'
-)
-
-# Calculate YoY change
-table_data['yoy_margin_change'] = table_data.apply(
-    lambda row: ((row['margin'] - row['margin_prev_year']) / row['margin_prev_year'] * 100) 
-    if row['margin_prev_year'] != 0 
-    else float('inf'),
-    axis=1
-)
-
-# Format YoY change as percentage
-table_data['yoy_margin_change'] = table_data['yoy_margin_change'].apply(
-    lambda x: f"{x:.1f}%" if x != float('inf') else "N/A"
-)
-# Drop the margin_prev_year, cum_margin_share, and margin_share columns from the final table_data
-table_data = table_data.drop(columns=['margin_prev_year', 'cum_margin_share', 'margin_share'])
-
+# Additional computations already handled in utils.py
 # Display the table
 st.header("Detailed Data Table")
 st.dataframe(table_data)
@@ -488,7 +380,7 @@ if st.session_state.model_df is not None and not st.session_state.model_df.empty
     model_row = model_df.iloc[0]
 
     # Display the logged text in grey with a border
-    if st.session_state.model_logged_text:  # Only display if model_logged_text exists in session state
+    if st.session_state.model_logged_text:  # Only display if logged_text exists in session state
         st.markdown("**Logged Text:**")
         st.markdown(
             f"""<div style='background-color: #f0f2f6; padding: 15px; border-radius: 5px; border: 1px solid #e0e0e0; color: black;'>
@@ -546,3 +438,67 @@ else:
             </div>""", 
             unsafe_allow_html=True
         )
+
+# ------------------ Chapter 6: Run Hierarchy Identification Agent ------------------
+
+st.markdown("---")  # Divider
+
+st.header("6. Run Hierarchy Identification Agent")
+
+# Dropdown to select a sous-famille
+sous_famille_list = sorted(hierarchy[hierarchy['level_name'] == 'Sous-Famille']['name'].unique().tolist())
+selected_sous_famille = st.selectbox("Select a Sous-Famille", options=sous_famille_list)
+
+# Button to collect model data
+collect_button = st.button("Collect Model Data", key="collect_model_data_button")
+
+if collect_button:
+    api_key = os.getenv("OPENAI_API_KEY")
+    if not api_key:
+        st.error("OPENAI_API_KEY not found in environment variables.")
+    else:
+        with st.spinner("Running hierarchy identification and collecting model data..."):
+            try:
+                # Run identify_optimization_levels to get optimization levels
+                optimization_df, logged_text = identify_optimization_levels(
+                    hierarchy, selected_sous_famille, api_key, example_models
+                )
+                
+                # Get Optimization Level IDs
+                optimization_level_ids = optimization_df['Optimization Level ID'].tolist()
+                
+                # Filter hierarchy by optimization_level_ids
+                filtered_hierarchy = hierarchy[hierarchy['level'].isin(optimization_level_ids)]
+                
+                # Filter sales data for the selected sous-famille
+                material_ids = hierarchy[hierarchy['name'] == selected_sous_famille]['material_id']
+                filtered_sales_ch6 = sales[
+                    (sales['date'] >= start_date) & 
+                    (sales['date'] <= end_date) & 
+                    (sales['material_id'].isin(material_ids))
+                ]
+
+                # Filter sales data for the previous year
+                filtered_sales_previous_year = sales[
+                    (sales['date'] >= start_date - pd.DateOffset(years=1)) & 
+                    (sales['date'] <= end_date - pd.DateOffset(years=1)) & 
+                    (sales['material_id'].isin(material_ids))
+                ]
+                
+                # Prepare table data using the utility function
+                table_data_ch6 = prepare_table_data(
+                    material_ids=material_ids,
+                    hierarchy=hierarchy,
+                    sales=filtered_sales_ch6,
+                    master=filtered_master,
+                    optimization_level_ids=optimization_level_ids,
+                    previous_year_sales=filtered_sales_previous_year
+                )
+                
+                # Display the table
+                st.success("Model Data collected successfully.")
+                st.dataframe(table_data_ch6)
+                
+            except Exception as e:
+                st.error(f"An error occurred: {e}")
+

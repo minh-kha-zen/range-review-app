@@ -9,7 +9,7 @@ def identify_optimization_levels(hierarchy_df: pd.DataFrame, sous_famille: str, 
     results = []
 
     # Read existing feedback to include in the prompt and track rejected levels
-    feedback_file = "feedback.csv"
+    feedback_file = "feedback_hierarchy.csv"
     combined_feedback = ""
     rejected_levels = {}  # Dictionary to track rejected levels per Sous-Famille
 
@@ -102,22 +102,15 @@ def identify_optimization_levels(hierarchy_df: pd.DataFrame, sous_famille: str, 
 
         prompt = f"""
         You are an expert in product portfolio management analyzing a product hierarchy.
-        Models are specific product variants (e.g., AMANDIE, CANCALE, MOLENE).
+        Models are specific product variants (e.g., amandie, cancale, molene).
         Typically, models are named after a person, a place, or a fantasy name.
-        Types refer to general categories or styles of products (e.g., MONOBLOC, PANNEAU).
-        Product lines are broader categories or series (e.g., ETOILE).
-
-        Examples:
-        - Models: {example_models_str}.
-        - Types: 'MONOBLOC', 'PANNEAU'.
-        - Product Lines: 'ETOILE'.
-
-        **Important:** Models can appear at any hierarchy level. Do not assume a specific level for models.
+        Types refer to general categories or styles of products (e.g., mononbloc, panneau).
+        Product lines are broader categories or series (e.g., etoile).
 
         **Identification Guidelines:**
         1. **Model Indicators:**
-            - Names are unique and often reflect people, places, or unique identifiers.
-            - Multiple distinct names at the same level indicate models.
+            - Model names are unique and often reflect people, places, or unique identifiers.
+            - Multiple distinct model names at the same level indicate models.
         2. **Type Indicators:**
             - Descriptive of product categories or styles.
             - Common nouns representing a kind of product.
@@ -128,6 +121,13 @@ def identify_optimization_levels(hierarchy_df: pd.DataFrame, sous_famille: str, 
             - Specifications are additional information that describe a product (e.g. color, size, number of doors, etc.).
             - Specifications are in French and need to be translated to English.
             - French specification examples are: foyers, coleur, finition.
+
+        Examples:
+        - Models: {example_models_str}.
+        - Types: 'mononbloc', 'panneau'.
+        - Product Lines: 'etoile'.
+
+        **Important:** When you find 'Types' or 'Product Lines' at the current level, move to the next level.
 
         **Decision Process:**
         - **If the entities at the current level include multiple distinct names from the Models list, identify this level as containing models.**
