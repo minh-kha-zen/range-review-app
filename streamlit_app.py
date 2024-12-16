@@ -229,8 +229,9 @@ st.markdown("---")  # Divider
 # ------------------ Chapter 4: Model Hierarchy Identification Agent ------------------
 
 st.header("4. Model Hierarchy Identification Agent")
-st.write("Enter a Sous-Famille to identify the optimization level.")
-sous_famille_input = st.text_input("Enter a Sous-Famille")
+st.write("Select a Sous-Famille to identify the optimization level.")
+sous_famille_list = sorted(hierarchy[hierarchy['level_name'] == 'Sous-Famille']['name'].unique().tolist())
+selected_sous_famille_ch4 = st.selectbox("Select a Sous-Famille", options=sous_famille_list, key="selected_sous_famille_ch4")
 
 example_models = attributes[attributes['key'] == 'Modèle']['value'].unique().tolist()
 
@@ -246,11 +247,11 @@ if st.button("Identify Optimization Levels"):
     sous_famille = None
     
     # Check if user provided input
-    if sous_famille_input.strip() == "":
-        st.error("Please enter a Sous-Famille.")
+    if selected_sous_famille_ch4.strip() != "":
+        st.error("Please select a Sous-Famille.")
     else:
         # Assign the input to sous_famille
-        sous_famille = sous_famille_input.strip()
+        sous_famille = selected_sous_famille_ch4.strip()
         api_key = os.getenv("OPENAI_API_KEY")
         
         if not api_key:
@@ -335,8 +336,9 @@ if st.session_state.optimization_df is not None:
 st.markdown("---")  # Divider
 
 st.header("5. Model Extraction Agent")
-st.write("Enter a Sous-Famille to extract all models.")
-sous_famille_input_model = st.text_input("Enter a Sous-Famille for Model Extraction")
+st.write("Select a Sous-Famille to extract all models.")
+sous_famille_list_model = sorted(hierarchy[hierarchy['level_name'] == 'Sous-Famille']['name'].unique().tolist())
+selected_sous_famille_ch5 = st.selectbox("Select a Sous-Famille", options=sous_famille_list_model, key="selected_sous_famille_ch5")
 
 extract_button = st.button("Extract Models")
 
@@ -345,11 +347,11 @@ if extract_button:
     sous_famille_model = None
     
     # Check if user provided input
-    if sous_famille_input_model.strip() == "":
-        st.error("Please enter a Sous-Famille.")
+    if selected_sous_famille_ch5.strip() == "":
+        st.error("Please select a Sous-Famille.")
     else:
         # Assign the input to sous_famille_model
-        sous_famille_model = sous_famille_input_model.strip()
+        sous_famille_model = selected_sous_famille_ch5.strip()
         api_key = os.getenv("OPENAI_API_KEY")
         
         if not api_key:
