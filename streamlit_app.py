@@ -3,14 +3,15 @@ import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
 from hierarchy_identification_agent import identify_optimization_levels
-from model_extraction_agent import extract_models_for_sub_family  # Importing the new extraction agent
-from utils import prepare_table_data  # Import the utility function
+from model_extraction_agent import extract_models_for_sub_family 
+from category_evaluation_agent import evaluate_sub_families 
+from utils import prepare_table_data, prepare_data_for_sub_family 
 
 st.set_page_config(layout="wide")
 
 FEEDBACK_FILE_HIERARCHY = "feedback_hierarchy.csv"
 FEEDBACK_FILE_MODEL = "feedback_model.csv"
-
+api_key = os.getenv("OPENAI_API_KEY")
 # Helper function to save feedback
 def save_feedback(feedback_data, feedback_file):
     """
@@ -252,7 +253,6 @@ if st.button("Identify Optimization Levels"):
     else:
         # Assign the input to sous_famille
         sous_famille = selected_sous_famille_ch4.strip()
-        api_key = os.getenv("OPENAI_API_KEY")
         
         if not api_key:
             st.error("OPENAI_API_KEY not found in environment variables.")
@@ -352,7 +352,6 @@ if extract_button:
     else:
         # Assign the input to sous_famille_model
         sous_famille_model = selected_sous_famille_ch5.strip()
-        api_key = os.getenv("OPENAI_API_KEY")
         
         if not api_key:
             st.error("OPENAI_API_KEY not found in environment variables.")
@@ -455,52 +454,64 @@ selected_sous_famille_ch6 = st.selectbox("Select a Sous-Famille", options=sous_f
 collect_button = st.button("Collect Insight Data", key="collect_data_button")
 
 if collect_button:
-    api_key = os.getenv("OPENAI_API_KEY")
     if not api_key:
         st.error("OPENAI_API_KEY not found in environment variables.")
     else:
         with st.spinner("Running hierarchy identification and collecting model data..."):
             try:
-                # Run identify_optimization_levels to get optimization levels
-                optimization_df, logged_text = identify_optimization_levels(
-                    hierarchy, selected_sous_famille_ch6, api_key, example_models
-                )
+                # # Run identify_optimization_levels to get optimization levels
+                # optimization_df, logged_text = identify_optimization_levels(
+                #     hierarchy, selected_sous_famille_ch6, api_key, example_models
+                # )
                 
-                # Get model Level IDs
-                model_level_id = optimization_df['Optimization Level ID'].iloc[0]
+                # # Get model Level IDs
+                # model_level_id = optimization_df['Optimization Level ID'].iloc[0]
                 
-                # Filter hierarchy by optimization_level_id
-                filtered_hierarchy = hierarchy[hierarchy['level'] == model_level_id]
+                # # Filter hierarchy by optimization_level_id
+                # filtered_hierarchy = hierarchy[hierarchy['level'] == model_level_id]
                 
-                # Filter sales data for the selected sous-famille
-                material_ids = hierarchy[hierarchy['name'] == selected_sous_famille_ch6]['material_id']
+                # # Filter sales data for the selected sous-famille
+                # material_ids = hierarchy[hierarchy['name'] == selected_sous_famille_ch6]['material_id']
 
-                filtered_sales_ch6 = sales[
-                    (sales['date'] >= start_date) & 
-                    (sales['date'] <= end_date) & 
-                    (sales['bundle'] == bundle_option) &
-                    (sales['material_id'].isin(material_ids))
-                ]
+                # filtered_sales_ch6 = sales[
+                #     (sales['date'] >= start_date) & 
+                #     (sales['date'] <= end_date) & 
+                #     (sales['bundle'] == bundle_option) &
+                #     (sales['material_id'].isin(material_ids))
+                # ]
 
-                # Filter sales data for the previous year
-                filtered_sales_previous_year = sales[
-                    (sales['date'] >= start_date - pd.DateOffset(years=1)) & 
-                    (sales['date'] <= end_date - pd.DateOffset(years=1)) & 
-                    (sales['bundle'] == bundle_option) &
-                    (sales['material_id'].isin(material_ids))
-                ]
+                # # Filter sales data for the previous year
+                # filtered_sales_previous_year = sales[
+                #     (sales['date'] >= start_date - pd.DateOffset(years=1)) & 
+                #     (sales['date'] <= end_date - pd.DateOffset(years=1)) & 
+                #     (sales['bundle'] == bundle_option) &
+                #     (sales['material_id'].isin(material_ids))
+                # ]
 
-                sub_family_level_id = 3
+                # sub_family_level_id = 3
                 
-                # Prepare table data using the utility function
-                table_data_ch6 = prepare_table_data(
-                    material_ids=material_ids,
-                    hierarchy=hierarchy,
-                    sales=filtered_sales_ch6,
-                    master=filtered_master,
-                    optimization_level_id=sub_family_level_id,
-                    previous_year_sales=filtered_sales_previous_year,
-                    model_level_id=model_level_id
+                # # Prepare table data using the utility function
+                # table_data_ch6 = prepare_table_data(
+                #     material_ids=material_ids,
+                #     hierarchy=hierarchy,
+                #     sales=filtered_sales_ch6,
+                #     master=filtered_master,
+                #     optimization_level_id=sub_family_level_id,
+                #     previous_year_sales=filtered_sales_previous_year,
+                #     model_level_id=model_level_id
+                # )
+
+                # Call the new function to prepare data for the selected sous-famille
+                table_data_ch6 = prepare_data_for_sub_family(
+                    selected_sous_famille_ch6,
+                    hierarchy,
+                    sales,
+                    start_date,
+                    end_date,
+                    bundle_option,
+                    master,
+                    api_key,
+                    example_models
                 )
                 
                 # Display the table
@@ -510,3 +521,94 @@ if collect_button:
             except Exception as e:
                 st.error(f"An error occurred: {e}")
 
+st.markdown("---")  # Divider
+
+st.header("7. Identify Sub-Families for Range Review")
+st.write("Select a Famille to identify all Sub-Families for Range Review.")
+
+# Dropdown to select a sous-famille
+famille_list = sorted(hierarchy[hierarchy['level_name'] == 'Famille']['name'].unique().tolist())
+selected_famille_ch7 = st.selectbox("Select a Famille", options=famille_list, key="selected_famille_ch7")
+
+# Text input for users to enter sub-families to exclude
+exclude_input = st.text_input(
+    "Enter Sub-Families to Exclude (comma-separated)",
+    value="ACCESSOIRES, PIECES DETACHEE, PROMOS, EXPO, LIMITEES",  # Default value for guidance
+    key="exclude_sub_families_input"
+)
+
+# Split the input into a list
+exclude_sub_families = [sub_family.strip() for sub_family in exclude_input.split(',')]
+no_of_categories_to_review = st.number_input("Set the number of sub-families to review:", min_value=1, max_value=100, value=2, step=1)
+
+# Button to insight data
+compile_button = st.button("Compile Data", key="compile_data_button")
+
+if compile_button:
+    # Run identify_sub_families in selected family
+    selected_hierarchy = hierarchy[hierarchy['name'] == selected_famille_ch7]
+    material_ids = selected_hierarchy['material_id'].unique()
+
+    sous_famille_hierarchy = hierarchy[
+        (hierarchy['level_name'] == 'Sous-Famille') & 
+        (hierarchy['material_id'].isin(material_ids))
+    ]
+    
+    # Adjust the filtering logic to check for substrings
+    filtered_sous_famille_hierarchy = sous_famille_hierarchy[
+        ~sous_famille_hierarchy['name'].str.contains('|'.join(exclude_sub_families), case=False, na=False)
+    ]
+
+    unique_sous_famille_names = filtered_sous_famille_hierarchy['name'].unique()
+
+    # Initialize an empty list to store DataFrames
+    all_dataframes = []
+
+    # Create a progress bar
+    progress_text = "Preparing data for sub-families. Please wait..."
+    progress_bar = st.progress(0, text=progress_text)
+
+    # Loop through each unique sous-famille name
+    for i, sous_famille in enumerate(unique_sous_famille_names):
+        # Call the function to prepare data for each sous-famille
+        table_data_ch7 = prepare_data_for_sub_family(
+            sous_famille,
+            hierarchy,
+            sales,
+            start_date,
+            end_date,
+            bundle_option,
+            master,
+            api_key,
+            example_models
+        )
+        
+        # Append the resulting DataFrame to the list
+        all_dataframes.append(table_data_ch7)
+
+        # Update the progress bar
+        progress_percentage = int((i + 1) / len(unique_sous_famille_names) * 100)  # Convert to integer
+        progress_bar.progress(progress_percentage, text=progress_text)
+
+    # Concatenate all DataFrames into one
+    insights_table = pd.concat(all_dataframes, ignore_index=True)
+
+    # Store the final_table in session state
+    st.session_state.insights_table = insights_table
+
+# Check if final_table exists in session state and display it
+if 'insights_table' in st.session_state:
+    st.write("Combined Data Table for Selected Sous-Familles:", st.session_state.insights_table)
+
+    evaluate_button = st.button("Evaluate Sub-Families")
+
+    if evaluate_button:
+        if 'insights_table' in st.session_state:
+            # Input for maximum number of evaluations
+            insights_df = st.session_state.insights_table
+            with st.spinner("Evaluating sub-families..."):
+                evaluation_results = evaluate_sub_families(insights_df, api_key, no_of_categories_to_review)
+                st.success("Sub-families evaluated successfully.")
+                st.dataframe(evaluation_results)  
+        else:
+            st.warning("No data available to evaluate. Please prepare the data first.")

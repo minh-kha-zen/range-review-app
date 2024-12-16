@@ -1,4 +1,5 @@
 import pandas as pd
+from hierarchy_identification_agent import identify_optimization_levels
 
 def prepare_table_data(
     material_ids, 
@@ -133,6 +134,46 @@ def prepare_table_data(
         return 0
     
     table_data['margin_spread'] = table_data['name'].apply(calculate_margin_spread)
+
+    def calculate_number_of_models(current_value):
+        # Pivot the hierarchy to get all levels as columns
+        hierarchy_pivoted = hierarchy.pivot(
+            index='material_id',
+            columns='level_name',
+            values='name'
+        ).reset_index()
+
+        # Join the pivoted hierarchy with merged_data
+        merged_data_with_hierarchy = pd.merge(
+            merged_data,
+            hierarchy_pivoted,
+            on='material_id',
+            how='left'
+        )
+
+        if model_level_id is None:
+            lower_level = optimization_level_id + 1
+        else:
+            lower_level = model_level_id
+
+        if lower_level in hierarchy['level'].values:
+            current_level_ids = hierarchy[hierarchy['name'] == current_value]['material_id'].unique().tolist()
+            lower_level_data = merged_data_with_hierarchy[merged_data_with_hierarchy['material_id'].isin(current_level_ids)]
+
+            # Get the name of the next level
+            lower_level_name = hierarchy[hierarchy['level'] == lower_level]['level_name'].iloc[0]
+
+            if lower_level_name in lower_level_data.columns and not lower_level_data.empty:
+                number_of_models = lower_level_data[lower_level_name].nunique()
+                return number_of_models
+
+        return 0
+
+    table_data['number_of_models'] = table_data['name'].apply(calculate_number_of_models)
+    table_data['margin_per_model'] = table_data.apply(
+        lambda row: row['margin'] / row['number_of_models'] if row['number_of_models'] > 0 else 0,
+        axis=1
+    )
     
     # Calculate YoY Change if previous_year_sales is provided
     if previous_year_sales is not None:
@@ -161,9 +202,12 @@ def prepare_table_data(
         # Fill NaN for models without previous year data
         table_data['yoy_margin_change'] = table_data['yoy_margin_change'].fillna("N/A")
 
-    # 
-    table_data['Total Margin'] = '€' + (table_data['Total Margin'] / 1_000_000).round(1).astype(str) + 'M'
-    
+    # Add optimization level name to the table
+    if model_level_id is not None:
+        entity_level_name = hierarchy[hierarchy['level'] == model_level_id]['level_name'].iloc[0]
+        table_data['Entity Level Name'] = entity_level_name
+        table_data['Entity Level ID'] = model_level_id
+
     # Rename columns at the end
     table_data.rename(columns={
         'name': 'Model Name',
@@ -176,7 +220,9 @@ def prepare_table_data(
         'total_skus': 'Total SKUs',
         'margin_spread': 'Margin Spread',
         'yoy_margin_change': 'YoY Margin Change',
-        'pareto': 'Pareto'
+        'pareto': 'Pareto',
+        'number_of_models': 'Number of Models',
+        'margin_per_model': 'Margin per Model'
     }, inplace=True)
     
     # Format the columns for display
@@ -184,6 +230,7 @@ def prepare_table_data(
     table_data['Total Quantity'] = (table_data['Total Quantity'] / 1_000).round(1).astype(str) + 'K'
     table_data['Total Net Revenue'] = '€' + (table_data['Total Net Revenue'] / 1_000_000).round(1).astype(str) + 'M'
     table_data['Total SKUs'] = table_data['Total SKUs'].astype(str)  # Assuming this is already in the correct format
+    table_data['Average Discount'] = (table_data['Average Discount'] * 100).round(1).astype(str) + '%'
     table_data['Relative Margin'] = (table_data['Relative Margin'] * 100).round(1).astype(str) + '%'
 
     # Drop columns that are not needed
@@ -197,4 +244,52 @@ def prepare_table_data(
     table_data.drop(columns=columns_to_drop, inplace=True)
 
     # Return the final table_data
+    return table_data
+
+
+def prepare_data_for_sub_family(selected_sous_famille, hierarchy, sales, start_date, end_date, bundle_option, master, api_key, example_models):
+    # Run identify_optimization_levels to get optimization levels
+    optimization_df, logged_text = identify_optimization_levels(
+        hierarchy, selected_sous_famille, api_key, example_models
+    )
+
+    print(optimization_df)
+    
+    # Get model Level IDs
+    model_level_id = optimization_df['Optimization Level ID'].iloc[0]
+    
+    # Filter hierarchy by optimization_level_id
+    filtered_hierarchy = hierarchy[hierarchy['level'] == model_level_id]
+    
+    # Filter sales data for the selected sous-famille
+    material_ids = hierarchy[hierarchy['name'] == selected_sous_famille]['material_id']
+
+    filtered_sales_ch6 = sales[
+        (sales['date'] >= start_date) & 
+        (sales['date'] <= end_date) & 
+        (sales['bundle'] == bundle_option) &
+        (sales['material_id'].isin(material_ids))
+    ]
+
+    # Filter sales data for the previous year
+    filtered_sales_previous_year = sales[
+        (sales['date'] >= start_date - pd.DateOffset(years=1)) & 
+        (sales['date'] <= end_date - pd.DateOffset(years=1)) & 
+        (sales['bundle'] == bundle_option) &
+        (sales['material_id'].isin(material_ids))
+    ]
+
+    sub_family_level_id = 3
+    
+    # Prepare table data using the utility function
+    table_data = prepare_table_data(
+        material_ids=material_ids,
+        hierarchy=hierarchy,
+        sales=filtered_sales_ch6,
+        master=master,
+        optimization_level_id=sub_family_level_id,
+        previous_year_sales=filtered_sales_previous_year,
+        model_level_id=model_level_id
+    )
+    
     return table_data
