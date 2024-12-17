@@ -584,6 +584,9 @@ if 'insights_table' in st.session_state:
                     selected_model
                 )
                 st.success("Sub-families evaluated successfully.")
-                st.dataframe(evaluation_results)  
+                st.session_state.evaluation_results = evaluation_results
         else:
             st.warning("No data available to evaluate. Please prepare the data first.")
+
+    if 'evaluation_results' in st.session_state:
+        st.dataframe(st.session_state.evaluation_results)
