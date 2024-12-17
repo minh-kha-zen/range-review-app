@@ -589,4 +589,4 @@ if 'insights_table' in st.session_state:
             st.warning("No data available to evaluate. Please prepare the data first.")
 
     if 'evaluation_results' in st.session_state:
-        st.dataframe(st.session_state.evaluation_results)
+        st.dataframe(st.session_state.evaluation_results, use_container_width=True)
