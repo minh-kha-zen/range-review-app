@@ -12,6 +12,7 @@ st.set_page_config(layout="wide")
 FEEDBACK_FILE_HIERARCHY = "feedback_hierarchy.csv"
 FEEDBACK_FILE_MODEL = "feedback_model.csv"
 api_key = os.getenv("OPENAI_API_KEY")
+
 # Helper function to save feedback
 def save_feedback(feedback_data, feedback_file):
     """
@@ -49,6 +50,7 @@ st.write("Demo workflow for LLM-based range review")
 load_dotenv()  # Load environment variables from .env file
 BASE_PATH = os.path.join(os.getenv("BASE_PATH"), "03_Dashboard_data", "dev")
 
+# Read parquet files
 master = pd.read_parquet(os.path.join(BASE_PATH, "master.parquet"))
 hierarchy = pd.read_parquet(os.path.join(BASE_PATH, "hierarchy.parquet"))
 supplier = pd.read_parquet(os.path.join(BASE_PATH, "suppliers.parquet"))
@@ -63,6 +65,7 @@ st.write("Sales Data")
 st.write(sales.head())
 st.write("Hierarchy Data")
 st.write(hierarchy.head(10))
+
 st.markdown("---")
 st.header("2. Data Preparation")
 # Create columns for filters
@@ -81,7 +84,7 @@ with col3:
 
 with col4:
     # Dropdown for product_status in master data
-    product_status = st.multiselect("Select Product Status", options=["0", "1", "2", "3", "4"], default=["0", "1", "2", "3", "4"])
+    product_status = st.multiselect("Select Product Status", options=["0", "1", "2", "3", "4"], default=["0"])
 
 # Convert start_date and end_date to datetime
 start_date = pd.to_datetime(start_date)
@@ -459,48 +462,6 @@ if collect_button:
     else:
         with st.spinner("Running hierarchy identification and collecting model data..."):
             try:
-                # # Run identify_optimization_levels to get optimization levels
-                # optimization_df, logged_text = identify_optimization_levels(
-                #     hierarchy, selected_sous_famille_ch6, api_key, example_models
-                # )
-                
-                # # Get model Level IDs
-                # model_level_id = optimization_df['Optimization Level ID'].iloc[0]
-                
-                # # Filter hierarchy by optimization_level_id
-                # filtered_hierarchy = hierarchy[hierarchy['level'] == model_level_id]
-                
-                # # Filter sales data for the selected sous-famille
-                # material_ids = hierarchy[hierarchy['name'] == selected_sous_famille_ch6]['material_id']
-
-                # filtered_sales_ch6 = sales[
-                #     (sales['date'] >= start_date) & 
-                #     (sales['date'] <= end_date) & 
-                #     (sales['bundle'] == bundle_option) &
-                #     (sales['material_id'].isin(material_ids))
-                # ]
-
-                # # Filter sales data for the previous year
-                # filtered_sales_previous_year = sales[
-                #     (sales['date'] >= start_date - pd.DateOffset(years=1)) & 
-                #     (sales['date'] <= end_date - pd.DateOffset(years=1)) & 
-                #     (sales['bundle'] == bundle_option) &
-                #     (sales['material_id'].isin(material_ids))
-                # ]
-
-                # sub_family_level_id = 3
-                
-                # # Prepare table data using the utility function
-                # table_data_ch6 = prepare_table_data(
-                #     material_ids=material_ids,
-                #     hierarchy=hierarchy,
-                #     sales=filtered_sales_ch6,
-                #     master=filtered_master,
-                #     optimization_level_id=sub_family_level_id,
-                #     previous_year_sales=filtered_sales_previous_year,
-                #     model_level_id=model_level_id
-                # )
-
                 # Call the new function to prepare data for the selected sous-famille
                 table_data_ch6 = prepare_data_for_sub_family(
                     selected_sous_famille_ch6,
@@ -533,7 +494,7 @@ selected_famille_ch7 = st.selectbox("Select a Famille", options=famille_list, ke
 # Text input for users to enter sub-families to exclude
 exclude_input = st.text_input(
     "Enter Sub-Families to Exclude (comma-separated)",
-    value="ACCESSOIRES, PIECES DETACHEE, PROMOS, EXPO, LIMITEES",  # Default value for guidance
+    value="ACCESSOIRES, PIECES DETACHEE, PROMOS, EXPO, LIMITEES, DIVERS, AUTRES, GARANTIE",  # Default value for guidance
     key="exclude_sub_families_input"
 )
 
@@ -578,9 +539,9 @@ if compile_button:
             start_date,
             end_date,
             bundle_option,
-            master,
+            filtered_master,
             api_key,
-            example_models
+            example_models,
         )
         
         # Append the resulting DataFrame to the list
@@ -600,6 +561,15 @@ if compile_button:
 if 'insights_table' in st.session_state:
     st.write("Combined Data Table for Selected Sous-Familles:", st.session_state.insights_table)
 
+    model_options = [
+        "gpt-4o", 
+        "gpt-4o-mini", 
+        "gpt-3.5-turbo", 
+        "o1-mini",
+        "o1-preview"
+    ]
+    selected_model = st.selectbox("Select GPT Model for Evaluation", options=model_options, index=0)
+
     evaluate_button = st.button("Evaluate Sub-Families")
 
     if evaluate_button:
@@ -607,7 +577,12 @@ if 'insights_table' in st.session_state:
             # Input for maximum number of evaluations
             insights_df = st.session_state.insights_table
             with st.spinner("Evaluating sub-families..."):
-                evaluation_results = evaluate_sub_families(insights_df, api_key, no_of_categories_to_review)
+                evaluation_results = evaluate_sub_families(
+                    insights_df, 
+                    api_key, 
+                    no_of_categories_to_review, 
+                    selected_model
+                )
                 st.success("Sub-families evaluated successfully.")
                 st.dataframe(evaluation_results)  
         else:

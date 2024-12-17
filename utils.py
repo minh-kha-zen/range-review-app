@@ -39,7 +39,7 @@ def prepare_table_data(
         merged_data, 
         master[['material_id', 'date_of_introduction']], 
         on='material_id', 
-        how='left'
+        how='inner'
     )
     
     # Group by model name and compile necessary columns
@@ -110,27 +110,32 @@ def prepare_table_data(
         else:
             lower_level = model_level_id
 
-        if lower_level in hierarchy['level'].values:
+        if lower_level in hierarchy['level'].values or lower_level == "SKU":
             current_level_ids = hierarchy[hierarchy['name'] == current_value]['material_id'].unique().tolist()
             lower_level_data = merged_data_with_hierarchy[merged_data_with_hierarchy['material_id'].isin(current_level_ids)]
 
-            # Get the name of the next level
-            lower_level_name = hierarchy[hierarchy['level'] == lower_level]['level_name'].iloc[0]
+            if lower_level != "SKU":
+                # Get the name of the next level
+                lower_level_name = hierarchy[hierarchy['level'] == lower_level]['level_name'].iloc[0]
 
-            if lower_level_name in lower_level_data.columns and not lower_level_data.empty:
-                lower_level_margins = lower_level_data.groupby(lower_level_name).agg(
+                if lower_level_name in lower_level_data.columns and not lower_level_data.empty:
+                    lower_level_margins = lower_level_data.groupby(lower_level_name).agg(
+                        total_margin=('margin', 'sum'),
+                        total_revenue=('net_revenue', 'sum')
+                    ).reset_index()
+            else:
+                lower_level_margins = lower_level_data.groupby('material_id').agg(
                     total_margin=('margin', 'sum'),
                     total_revenue=('net_revenue', 'sum')
                 ).reset_index()
-
-                lower_level_margins['relative_margin'] = lower_level_margins.apply(
+            lower_level_margins['relative_margin'] = lower_level_margins.apply(
                     lambda row: (row['total_margin'] / row['total_revenue'] * 100) if row['total_revenue'] != 0 else 0,
                     axis=1
                 )
+            max_margin = lower_level_margins['relative_margin'].max()
+            min_margin = lower_level_margins['relative_margin'].min()
+            return max_margin - min_margin
 
-                max_margin = lower_level_margins['relative_margin'].max()
-                min_margin = lower_level_margins['relative_margin'].min()
-                return max_margin - min_margin
         return 0
     
     table_data['margin_spread'] = table_data['name'].apply(calculate_margin_spread)
@@ -156,15 +161,19 @@ def prepare_table_data(
         else:
             lower_level = model_level_id
 
-        if lower_level in hierarchy['level'].values:
+        if lower_level in hierarchy['level'].values or lower_level == "SKU": 
             current_level_ids = hierarchy[hierarchy['name'] == current_value]['material_id'].unique().tolist()
             lower_level_data = merged_data_with_hierarchy[merged_data_with_hierarchy['material_id'].isin(current_level_ids)]
 
-            # Get the name of the next level
-            lower_level_name = hierarchy[hierarchy['level'] == lower_level]['level_name'].iloc[0]
+            if lower_level != "SKU":
+                # Get the name of the next level
+                lower_level_name = hierarchy[hierarchy['level'] == lower_level]['level_name'].iloc[0]
 
-            if lower_level_name in lower_level_data.columns and not lower_level_data.empty:
-                number_of_models = lower_level_data[lower_level_name].nunique()
+                if lower_level_name in lower_level_data.columns and not lower_level_data.empty:
+                    number_of_models = lower_level_data[lower_level_name].nunique()
+                    return number_of_models
+            else:
+                number_of_models = lower_level_data['material_id'].nunique()
                 return number_of_models
 
         return 0
@@ -204,8 +213,11 @@ def prepare_table_data(
 
     # Add optimization level name to the table
     if model_level_id is not None:
-        entity_level_name = hierarchy[hierarchy['level'] == model_level_id]['level_name'].iloc[0]
-        table_data['Entity Level Name'] = entity_level_name
+        if model_level_id != "SKU":
+            entity_level_name = hierarchy[hierarchy['level'] == model_level_id]['level_name'].iloc[0]
+            table_data['Entity Level Name'] = entity_level_name
+        else:
+            table_data['Entity Level Name'] = "SKU"
         table_data['Entity Level ID'] = model_level_id
 
     # Rename columns at the end
@@ -226,12 +238,13 @@ def prepare_table_data(
     }, inplace=True)
     
     # Format the columns for display
-    table_data['Total Margin'] = '€' + (table_data['Total Margin'] / 1_000_000).round(1).astype(str) + 'M'
-    table_data['Total Quantity'] = (table_data['Total Quantity'] / 1_000).round(1).astype(str) + 'K'
-    table_data['Total Net Revenue'] = '€' + (table_data['Total Net Revenue'] / 1_000_000).round(1).astype(str) + 'M'
+    table_data['Total Margin'] = '€' + (table_data['Total Margin'] / 1_000_000).round(2).astype(str) + 'M'
+    table_data['Total Quantity'] = (table_data['Total Quantity'] / 1_000).round(2).astype(str) + 'K'
+    table_data['Total Net Revenue'] = '€' + (table_data['Total Net Revenue'] / 1_000_000).round(2).astype(str) + 'M'
     table_data['Total SKUs'] = table_data['Total SKUs'].astype(str)  # Assuming this is already in the correct format
     table_data['Average Discount'] = (table_data['Average Discount'] * 100).round(1).astype(str) + '%'
     table_data['Relative Margin'] = (table_data['Relative Margin'] * 100).round(1).astype(str) + '%'
+    table_data['Margin per Model'] = '€' + (table_data['Margin per Model'] / 1_000).round(2).astype(str) + 'K'
 
     # Drop columns that are not needed
     columns_to_drop = [
@@ -253,7 +266,8 @@ def prepare_data_for_sub_family(selected_sous_famille, hierarchy, sales, start_d
         hierarchy, selected_sous_famille, api_key, example_models
     )
 
-    print(optimization_df)
+    for index, row in optimization_df.iterrows():
+        print(f"Sous-Famille Optimization Level Name: {row['Optimization Level Name']}\nOptimization Level ID: {row['Optimization Level ID']}\n")
     
     # Get model Level IDs
     model_level_id = optimization_df['Optimization Level ID'].iloc[0]

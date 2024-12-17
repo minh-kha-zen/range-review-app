@@ -1,8 +1,14 @@
 from openai import OpenAI
 
 import pandas as pd
+import re
 
-def evaluate_sub_families(insights_df: pd.DataFrame, api_key: str, no_of_categories_to_review: int) -> pd.DataFrame:
+def evaluate_sub_families(
+    insights_df: pd.DataFrame, 
+    api_key: str, 
+    no_of_categories_to_review: int, 
+    model: str
+) -> pd.DataFrame:
     """
     Evaluates sub-families in the insights_table to determine if they should be included in the portfolio review.
 
@@ -21,19 +27,36 @@ def evaluate_sub_families(insights_df: pd.DataFrame, api_key: str, no_of_categor
     prompt = create_evaluation_prompt(insights_df, no_of_categories_to_review)
 
     try:
-        response = client.chat.completions.create(model="gpt-3.5-turbo",
-        messages=[
-            {
-                "role": "system",
-                "content": "You are an expert in product portfolio management."
-            },
-            {
-                "role": "user",
-                "content": prompt
-            }
-        ],
-        max_tokens=1500,  # Adjust max_tokens as needed
-        temperature=0)
+        if "o1" not in model:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                {
+                    "role": "system",
+                    "content": "You are an expert in product portfolio management."
+                },
+                {
+                    "role": "user",
+                    "content": prompt
+                    }
+                ],
+                max_tokens=1500, 
+                temperature=0
+            )
+        else:
+            response = client.chat.completions.create(
+                model=model,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": prompt
+                    }
+                ]
+            )
+
+        print("============ RESPONSE =============\n")
+        print(response)
+        print("\n==================================\n")
 
         gpt_reply = response.choices[0].message.content.strip()
         results = parse_gpt_response(gpt_reply)
@@ -44,6 +67,10 @@ def evaluate_sub_families(insights_df: pd.DataFrame, api_key: str, no_of_categor
             'Assess for Evaluation': 'Error',
             'Explanation': f"An error occurred: {e}"
         }]
+
+        print("============ ERROR =============\n")
+        print(e)
+        print("\n================================\n")
 
     results = [result for result in results if result['Sub-Family'] and result['Assess for Evaluation'] == 'Yes']
 
@@ -102,13 +129,16 @@ def create_evaluation_prompt(insights_df: pd.DataFrame, no_of_categories_to_revi
     - Explanation: [Your reasoning here, including comparisons to other sub-families]
     """
 
+    print("============ PROMPT =============\n")
     print(prompt)
+    print("\n================================\n")
 
     return prompt
 
 def parse_gpt_response(response: str) -> list:
     """
     Parses the GPT response to extract the assessment and explanation.
+    Handles responses from o1-mini, o1-preview, and gpt-4o models.
 
     Args:
         response (str): The raw response from GPT.
@@ -116,26 +146,62 @@ def parse_gpt_response(response: str) -> list:
     Returns:
         list: A list of dictionaries containing the sub-family, assessment, and explanation.
     """
+
     results = []
-    sub_families = response.split('\n\n')
-    for sub_family in sub_families:
-        lines = sub_family.split('\n')
+
+    # Remove markdown formatting
+    response = response.replace('**', '').replace('---', '').strip()
+
+    # Split the response into sections based on markers
+    # Using regex to split on patterns that separate entries
+    sections = re.split(r'\n\s*\n+', response)  # Split on multiple newlines
+
+    for section in sections:
+        section = section.strip()
+        if not section:
+            continue
+
         sub_family_name = ''
-        assessment = 'No'
+        assessment = ''
         explanation = ''
 
-        for line in lines:
-            if 'Sub-Family' in line:
-                sub_family_name = line.split(':')[-1].strip()
-            elif 'Assessment' in line:
-                assessment = line.split(':')[-1].strip()
-            elif 'Explanation' in line:
-                explanation = line.split(':')[-1].strip()
+        # Use regex to find Sub-Family, Assessment, and Explanation
+        # The patterns may vary, so we check multiple possibilities
 
-        results.append({
-            'Sub-Family': sub_family_name,
-            'Assess for Evaluation': assessment,
-            'Explanation': explanation
-        })
+        # Sub-Family
+        sub_family_match = re.search(r'(?:Sub-Family[:]?|Sub-Family)\s*(?:\s*[:\-]\s*)?\s*(.*)', section)
+        if sub_family_match:
+            sub_family_line = sub_family_match.group(1).strip()
+            # Remove any extra prefixes or suffixes
+            sub_family_name = sub_family_line.strip('-').strip()
+
+        # Assessment
+        assessment_match = re.search(r'Assessment\s*\(Yes/No\)\s*[:\-]?\s*(\w+)', section)
+        if not assessment_match:
+            assessment_match = re.search(r'Assessment\s*[:\-]?\s*(\w+)', section)
+        if assessment_match:
+            assessment = assessment_match.group(1).strip()
+
+        # Explanation
+        explanation_match = re.search(r'Explanation\s*[:\-]\s*(.*)', section, re.DOTALL)
+        if explanation_match:
+            explanation = explanation_match.group(1).strip()
+        else:
+            # If 'Explanation' keyword is missing, try to capture content after 'Assessment'
+            assessment_end = section.find('Assessment')
+            if assessment_end != -1:
+                # Find the end of the 'Assessment' line
+                assessment_line_end = section.find('\n', assessment_end)
+                if assessment_line_end != -1:
+                    explanation = section[assessment_line_end+1:].strip()
+
+        # Only add results if the sub-family name is not empty
+        if sub_family_name and assessment:
+            result = {
+                'Sub-Family': sub_family_name,
+                'Assess for Evaluation': assessment,
+                'Explanation': explanation
+            }
+            results.append(result)
 
     return results
