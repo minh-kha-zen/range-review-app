@@ -221,7 +221,7 @@ def prepare_table_data(
         ).fillna(0)
 
         # Calculate YoY change of relative margin in percentage points
-        table_data['yoy_rel_margin_change'] = table_data['relative_margin'] - table_data['relative_margin_prev_year']
+        table_data['yoy_rel_margin_change'] = (table_data['relative_margin'] - table_data['relative_margin_prev_year']) * 100
 
     # Add optimization level name to the table
     if model_level_id is not None:
@@ -271,7 +271,7 @@ def format_insights_table(df):
     df_formatted['Relative Margin'] = (df_formatted['Relative Margin'] * 100).round(1).astype(str) + '%'
     df_formatted['Margin per Model'] = '€' + (df_formatted['Margin per Model'] / 1_000).round(2).astype(str) + 'K'
     df_formatted['YoY Abs. Margin Change'] = (df_formatted['YoY Abs. Margin Change'] * 100).round(1).astype(str) + '%'
-    df_formatted['YoY Rel. Margin Change'] = (df_formatted['YoY Rel. Margin Change'] * 100).round(1).astype(str) + 'pp'
+    df_formatted['YoY Rel. Margin Change'] = (df_formatted['YoY Rel. Margin Change']).round(1).astype(str) + 'pp'
     df_formatted['Margin Spread'] = (df_formatted['Margin Spread']).round(1).astype(str) + 'pp'
     df_formatted['Latest Introduction'] = pd.to_datetime(df_formatted['Latest Introduction']).dt.strftime('%Y-%m-%d')
     return df_formatted
@@ -325,7 +325,7 @@ def prepare_data_for_sub_family(selected_sous_famille, hierarchy, sales, start_d
     
     return table_data
 
-def create_or_update_list_item(site_id, list_id, item, access_token):
+def create_or_update_list_item(site_id, list_id, item, id_column, access_token):
     graph_api_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items"
 
     headers = {
@@ -334,21 +334,19 @@ def create_or_update_list_item(site_id, list_id, item, access_token):
         'Prefer': 'HonorNonIndexedQueriesWarningMayFailRandomly'
     }
 
-    # Create a copy of the item to avoid modifying the original
-    item_copy = item.copy()
-
-    # Convert any Timestamp objects to ISO format strings
-    for key, value in item_copy.items():
-        if isinstance(value, pd.Timestamp):
-            item_copy[key] = value.strftime('%Y-%m-%dT%H:%M:%SZ')
+    # Convert any Timestamp objects to ISO format strings at the beginning
+    item = {
+        key: (value.isoformat() if isinstance(value, pd.Timestamp) else value) 
+        for key, value in item.items()
+    }
 
     try:
-        # Escape apostrophes in the Title for the query
-        title_filter = item['Title'].replace("'", "''")
+        # Escape apostrophes in the ID column for the query
+        id_filter = item[id_column].replace("'", "''")
         
         # First, try to find an existing item
         response = requests.get(graph_api_url, headers=headers, params={
-            '$filter': f"fields/Title eq '{title_filter}'"
+            '$filter': f"fields/{id_column} eq '{id_filter}'"
         })
 
         print(response.json())
@@ -360,18 +358,9 @@ def create_or_update_list_item(site_id, list_id, item, access_token):
                 # Item exists, update it
                 existing_item_id = data['value'][0]['id']
                 
+                # Create update_payload dynamically, excluding 'id_column'
                 update_payload = {
-                    'reasoning': item_copy.get('reasoning'),
-                    'net_revenue': item_copy.get('net_revenue'),
-                    'margin': item_copy.get('margin'),
-                    'relative_margin': item_copy.get('relative_margin'),
-                    'avg_discount': item_copy.get('avg_discount'),
-                    'latest_intro': item_copy.get('latest_intro'), 
-                    'total_skus': item_copy.get('total_skus'),
-                    'margin_spread': item_copy.get('margin_spread'),
-                    'yoy_margin_change': item_copy.get('yoy_margin_change'),
-                    'number_of_models': item_copy.get('number_of_models'),
-                    'margin_per_model': item_copy.get('margin_per_model')
+                    key: value for key, value in item.items() if key != id_column
                 }
 
                 # Print request payload for debugging
@@ -389,7 +378,7 @@ def create_or_update_list_item(site_id, list_id, item, access_token):
         print("Did not find existing item\n")
 
         # Item doesn't exist, create a new one
-        create_payload = {'fields': item_copy}
+        create_payload = {'fields': item}
         print("Create Payload:", create_payload)
         create_response = requests.post(graph_api_url, json=create_payload, headers=headers)
 

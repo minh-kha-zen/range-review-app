@@ -654,8 +654,9 @@ if start_upload_button:
         # Iterate through the results DataFrame
         for index, row in filtered_results_df.iterrows():
             item = row.to_dict()
-            print("Uploading item: ", item['Title']) # Line break added
-            create_or_update_list_item(site_id, categories_to_review_list_id, item, access_token)
+            id_column = 'Title'
+            print("Uploading item: ", item[id_column]) # Line break added
+            create_or_update_list_item(site_id, categories_to_review_list_id, item, id_column, access_token)
             print("Uploaded item: ", item)
             print()
 
