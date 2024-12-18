@@ -1,4 +1,5 @@
 import pandas as pd
+import requests
 from hierarchy_identification_agent import identify_optimization_levels
 
 def prepare_table_data(
@@ -189,10 +190,21 @@ def prepare_table_data(
         # Join the model names from the 'name' column
         merged_data_prev_year = pd.merge(previous_year_sales, filtered_hierarchy, on='material_id', how='inner')
 
+        master_material_id = master['material_id'].unique().tolist()
+        merged_data_prev_year = merged_data_prev_year[merged_data_prev_year['material_id'].isin(master_material_id)]
+
         # Merge with previous year data
         table_data_prev_year = merged_data_prev_year.groupby('name').agg(
-            margin_prev_year=('margin', 'sum')
+            margin_prev_year=('margin', 'sum'),
+            net_revenue_prev_year=('net_revenue', 'sum')
         )
+
+        table_data_prev_year['relative_margin_prev_year'] = table_data_prev_year.apply(
+            lambda row: (row['margin_prev_year'] / row['net_revenue_prev_year']) if row['net_revenue_prev_year'] != 0 else 0,
+            axis=1
+        )
+
+        print("table_data_prev_year", table_data_prev_year)
         
         table_data = pd.merge(
             table_data, 
@@ -201,15 +213,15 @@ def prepare_table_data(
             how='left'
         )
         
-        # Calculate YoY change
+        # Calculate YoY change as raw float value
         table_data['yoy_margin_change'] = table_data.apply(
-            lambda row: f"{((row['margin'] - row['margin_prev_year']) / row['margin_prev_year'] * 100):.1f}%" 
-            if row['margin_prev_year'] > 0 else "N/A",
+            lambda row: (row['margin'] - row['margin_prev_year']) / row['margin_prev_year']
+            if row['margin_prev_year'] != 0 else 0,
             axis=1
-        )
-        
-        # Fill NaN for models without previous year data
-        table_data['yoy_margin_change'] = table_data['yoy_margin_change'].fillna("N/A")
+        ).fillna(0)
+
+        # Calculate YoY change of relative margin in percentage points
+        table_data['yoy_rel_margin_change'] = table_data['relative_margin'] - table_data['relative_margin_prev_year']
 
     # Add optimization level name to the table
     if model_level_id is not None:
@@ -220,10 +232,24 @@ def prepare_table_data(
             table_data['Entity Level Name'] = "SKU"
         table_data['Entity Level ID'] = model_level_id
 
-    # Rename columns at the end
-    table_data.rename(columns={
-        'name': 'Model Name',
-        'quantity': 'Total Quantity',
+    # Drop columns that are not needed
+    columns_to_drop = [
+        'margin_share',
+        'cum_margin_share',
+        'margin_prev_year',
+        'relative_margin_prev_year',
+        'net_revenue_prev_year',
+        'pareto',
+        'quantity'
+    ]
+    table_data.drop(columns=columns_to_drop, inplace=True)
+
+    # Return the final table_data
+    return table_data
+
+def format_insights_table(df):
+    df_formatted = df.rename(columns={
+        'name': 'Category Name',
         'net_revenue': 'Total Net Revenue',
         'margin': 'Total Margin',
         'relative_margin': 'Relative Margin',
@@ -231,33 +257,24 @@ def prepare_table_data(
         'latest_intro': 'Latest Introduction',
         'total_skus': 'Total SKUs',
         'margin_spread': 'Margin Spread',
-        'yoy_margin_change': 'YoY Margin Change',
-        'pareto': 'Pareto',
+        'yoy_margin_change': 'YoY Abs. Margin Change',
+        'yoy_rel_margin_change': 'YoY Rel. Margin Change',
         'number_of_models': 'Number of Models',
         'margin_per_model': 'Margin per Model'
-    }, inplace=True)
+    })
     
     # Format the columns for display
-    table_data['Total Margin'] = '€' + (table_data['Total Margin'] / 1_000_000).round(2).astype(str) + 'M'
-    table_data['Total Quantity'] = (table_data['Total Quantity'] / 1_000).round(2).astype(str) + 'K'
-    table_data['Total Net Revenue'] = '€' + (table_data['Total Net Revenue'] / 1_000_000).round(2).astype(str) + 'M'
-    table_data['Total SKUs'] = table_data['Total SKUs'].astype(str)  # Assuming this is already in the correct format
-    table_data['Average Discount'] = (table_data['Average Discount'] * 100).round(1).astype(str) + '%'
-    table_data['Relative Margin'] = (table_data['Relative Margin'] * 100).round(1).astype(str) + '%'
-    table_data['Margin per Model'] = '€' + (table_data['Margin per Model'] / 1_000).round(2).astype(str) + 'K'
-
-    # Drop columns that are not needed
-    columns_to_drop = [
-        'margin_share',
-        'cum_margin_share',
-        'margin_prev_year',
-        'Pareto',
-        'Total Quantity'
-    ]
-    table_data.drop(columns=columns_to_drop, inplace=True)
-
-    # Return the final table_data
-    return table_data
+    df_formatted['Total Margin'] = '€' + (df_formatted['Total Margin'] / 1_000_000).round(2).astype(str) + 'M'
+    df_formatted['Total Net Revenue'] = '€' + (df_formatted['Total Net Revenue'] / 1_000_000).round(2).astype(str) + 'M'
+    df_formatted['Total SKUs'] = df_formatted['Total SKUs'].astype(str)  # Assuming this is already in the correct format
+    df_formatted['Average Discount'] = (df_formatted['Average Discount'] * 100).round(1).astype(str) + '%'
+    df_formatted['Relative Margin'] = (df_formatted['Relative Margin'] * 100).round(1).astype(str) + '%'
+    df_formatted['Margin per Model'] = '€' + (df_formatted['Margin per Model'] / 1_000).round(2).astype(str) + 'K'
+    df_formatted['YoY Abs. Margin Change'] = (df_formatted['YoY Abs. Margin Change'] * 100).round(1).astype(str) + '%'
+    df_formatted['YoY Rel. Margin Change'] = (df_formatted['YoY Rel. Margin Change'] * 100).round(1).astype(str) + 'pp'
+    df_formatted['Margin Spread'] = (df_formatted['Margin Spread']).round(1).astype(str) + 'pp'
+    df_formatted['Latest Introduction'] = pd.to_datetime(df_formatted['Latest Introduction']).dt.strftime('%Y-%m-%d')
+    return df_formatted
 
 
 def prepare_data_for_sub_family(selected_sous_famille, hierarchy, sales, start_date, end_date, bundle_option, master, api_key, example_models):
@@ -307,3 +324,83 @@ def prepare_data_for_sub_family(selected_sous_famille, hierarchy, sales, start_d
     )
     
     return table_data
+
+def create_or_update_list_item(site_id, list_id, item, access_token):
+    graph_api_url = f"https://graph.microsoft.com/v1.0/sites/{site_id}/lists/{list_id}/items"
+
+    headers = {
+        'Authorization': f'Bearer {access_token}',
+        'Content-Type': 'application/json',
+        'Prefer': 'HonorNonIndexedQueriesWarningMayFailRandomly'
+    }
+
+    # Create a copy of the item to avoid modifying the original
+    item_copy = item.copy()
+
+    # Convert any Timestamp objects to ISO format strings
+    for key, value in item_copy.items():
+        if isinstance(value, pd.Timestamp):
+            item_copy[key] = value.strftime('%Y-%m-%dT%H:%M:%SZ')
+
+    try:
+        # Escape apostrophes in the Title for the query
+        title_filter = item['Title'].replace("'", "''")
+        
+        # First, try to find an existing item
+        response = requests.get(graph_api_url, headers=headers, params={
+            '$filter': f"fields/Title eq '{title_filter}'"
+        })
+
+        print(response.json())
+
+        if response.status_code == 200:
+            print("Found existing item\n")
+            data = response.json()
+            if data['value']:
+                # Item exists, update it
+                existing_item_id = data['value'][0]['id']
+                
+                update_payload = {
+                    'reasoning': item_copy.get('reasoning'),
+                    'net_revenue': item_copy.get('net_revenue'),
+                    'margin': item_copy.get('margin'),
+                    'relative_margin': item_copy.get('relative_margin'),
+                    'avg_discount': item_copy.get('avg_discount'),
+                    'latest_intro': item_copy.get('latest_intro'), 
+                    'total_skus': item_copy.get('total_skus'),
+                    'margin_spread': item_copy.get('margin_spread'),
+                    'yoy_margin_change': item_copy.get('yoy_margin_change'),
+                    'number_of_models': item_copy.get('number_of_models'),
+                    'margin_per_model': item_copy.get('margin_per_model')
+                }
+
+                # Print request payload for debugging
+                print("Update Payload:", update_payload)
+
+                update_response = requests.patch(
+                    f"{graph_api_url}/{existing_item_id}/fields",
+                    json=update_payload,
+                    headers=headers
+                )
+
+                if update_response.status_code == 200:
+                    return existing_item_id
+
+        print("Did not find existing item\n")
+
+        # Item doesn't exist, create a new one
+        create_payload = {'fields': item_copy}
+        print("Create Payload:", create_payload)
+        create_response = requests.post(graph_api_url, json=create_payload, headers=headers)
+
+        if create_response.status_code == 201:
+            print("Created new item\n")
+            return create_response.json().get('id')
+        
+        # Debug any error message from creation
+        print("Create item error:", create_response.json())
+        return None
+
+    except Exception as error:
+        print('Error in create_or_update_list_item:', error)
+        raise error

@@ -2,10 +2,11 @@ import os
 import streamlit as st
 import pandas as pd
 from dotenv import load_dotenv
+from category_evaluation_agent_dspy import evaluate_sub_families_dspy
 from hierarchy_identification_agent import identify_optimization_levels
 from model_extraction_agent import extract_models_for_sub_family 
 from category_evaluation_agent import evaluate_sub_families 
-from utils import prepare_table_data, prepare_data_for_sub_family 
+from utils import prepare_table_data, prepare_data_for_sub_family, create_or_update_list_item, format_insights_table
 
 st.set_page_config(layout="wide")
 
@@ -69,7 +70,7 @@ st.write(hierarchy.head(10))
 st.markdown("---")
 st.header("2. Data Preparation")
 # Create columns for filters
-col1, col2, col3, col4 = st.columns(4)
+col1, col2, col3, col4, col5 = st.columns(5)
 with col1:
     # Date filter for start date
     start_date = st.date_input("Select start date", value=pd.to_datetime("2024-01-01"))
@@ -86,6 +87,11 @@ with col4:
     # Dropdown for product_status in master data
     product_status = st.multiselect("Select Product Status", options=["0", "1", "2", "3", "4"], default=["0"])
 
+with col5:
+    # Dropdown for Type de complément in attributes data
+    unique_type_de_complement = attributes[attributes['key'] == 'Type de complément']['value'].unique().tolist()
+    type_de_complement = st.multiselect("Select Type de complément", options=unique_type_de_complement, default=["Principal"])
+
 # Convert start_date and end_date to datetime
 start_date = pd.to_datetime(start_date)
 end_date = pd.to_datetime(end_date)
@@ -99,6 +105,14 @@ filtered_sales = sales[
 
 # Filter master data based on product status
 filtered_master = master[master['product_status'].astype(str).isin(product_status)]
+
+# Filter master data based on type_de_complement
+print("number of principal ids", len(attributes[attributes['value'].isin(type_de_complement)]['material_id'].unique().tolist()))
+type_de_complement_material_ids = attributes[
+    (attributes['value'].isin(type_de_complement)) & 
+    (attributes['key'] == 'Type de complément')
+]['material_id'].unique().tolist()
+filtered_master = filtered_master[filtered_master['material_id'].isin(type_de_complement_material_ids)]
 
 # Inner join master and sales data on material_id
 merged_data = pd.merge(filtered_master, filtered_sales, on='material_id', how='inner')
@@ -223,10 +237,9 @@ table_data = prepare_table_data(
     previous_year_sales=previous_year_sales
 )
 
-# Additional computations already handled in utils.py
 # Display the table
 st.header("Detailed Data Table")
-st.dataframe(table_data)
+st.dataframe(format_insights_table(table_data))
 
 st.markdown("---")  # Divider
 
@@ -477,7 +490,7 @@ if collect_button:
                 
                 # Display the table
                 st.success("Insight Data collected successfully.")
-                st.dataframe(table_data_ch6)
+                st.dataframe(format_insights_table(table_data_ch6))
                 
             except Exception as e:
                 st.error(f"An error occurred: {e}")
@@ -559,25 +572,28 @@ if compile_button:
 
 # Check if final_table exists in session state and display it
 if 'insights_table' in st.session_state:
-    st.write("Combined Data Table for Selected Sous-Familles:", st.session_state.insights_table)
+    st.write(
+        "Combined Data Table for Selected Sous-Familles:", format_insights_table(st.session_state.insights_table)
+    )
 
     model_options = [
         "gpt-4o", 
         "gpt-4o-mini", 
         "gpt-3.5-turbo", 
         "o1-mini",
-        "o1-preview"
+        "o1-preview",
+        "o1",
     ]
-    selected_model = st.selectbox("Select GPT Model for Evaluation", options=model_options, index=0)
+    selected_model = st.selectbox("Select GPT Model for Evaluation", options=model_options, index=model_options.index("o1-mini"))
 
     evaluate_button = st.button("Evaluate Sub-Families")
 
     if evaluate_button:
         if 'insights_table' in st.session_state:
             # Input for maximum number of evaluations
-            insights_df = st.session_state.insights_table
+            insights_df = format_insights_table(st.session_state.insights_table)
             with st.spinner("Evaluating sub-families..."):
-                evaluation_results = evaluate_sub_families(
+                evaluation_results = evaluate_sub_families_dspy(
                     insights_df, 
                     api_key, 
                     no_of_categories_to_review, 
@@ -590,3 +606,61 @@ if 'insights_table' in st.session_state:
 
     if 'evaluation_results' in st.session_state:
         st.dataframe(st.session_state.evaluation_results, use_container_width=True)
+
+# ------------------ Chapter 8: Upload Results to Sharepoint List ------------------
+
+st.markdown("---")  # Divider
+
+st.header("8. Upload Results to Sharepoint List")
+
+access_token = st.text_input("Enter Access Token")
+
+start_upload_button = st.button("Start Upload")
+
+if start_upload_button:
+    if 'evaluation_results' in st.session_state:
+        # Input for maximum number of evaluations
+        results_df = st.session_state.evaluation_results
+
+        # Filter results to keep only rows where 'Assess for Evaluation' is 'Yes'
+        filtered_results_df = results_df[results_df['assessment'] == 'Yes'].copy()
+
+        # Left join with insights_table from session state
+        if 'insights_table' in st.session_state:
+            insights_df = st.session_state.insights_table
+            filtered_results_df = filtered_results_df.merge(insights_df, on='name', how='left')
+
+        # Drop the 'Assess for Evaluation' column
+        columns_to_drop = [
+            'assessment', 
+            'Entity Level Name',
+            'Entity Level ID',
+        ]
+        filtered_results_df.drop(columns=columns_to_drop, inplace=True)
+
+        # Rename columns as specified
+        filtered_results_df.rename(columns={
+            'name': 'Title',
+        }, inplace=True)
+
+
+        categories_to_review_list_id = '9148877c-ce53-421e-aebf-e6dcd60266a3'
+        project_list_id = '58cc53df-4e47-413a-9088-ef828aaeb7f8'
+        site_id = '89d6ee16-e20e-438e-a93b-81f067e2843b'
+
+        # Initialize the progress bar
+        progress_bar_ch8 = st.progress(0)
+
+        # Iterate through the results DataFrame
+        for index, row in filtered_results_df.iterrows():
+            item = row.to_dict()
+            print("Uploading item: ", item['Title']) # Line break added
+            create_or_update_list_item(site_id, categories_to_review_list_id, item, access_token)
+            print("Uploaded item: ", item)
+            print()
+
+            # Update the progress bar
+            progress_percentage = (index + 1) / len(filtered_results_df)
+            progress_bar_ch8.progress(progress_percentage)
+
+        st.success("Uploaded results to Sharepoint list successfully.")

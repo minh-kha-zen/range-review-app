@@ -2,7 +2,12 @@ import os
 import pandas as pd
 from openai import OpenAI
 
-def identify_optimization_levels(hierarchy_df: pd.DataFrame, sous_famille: str, api_key: str, example_models: list) -> tuple:
+def identify_optimization_levels(
+    hierarchy_df: pd.DataFrame, 
+    sous_famille: str, 
+    api_key: str, 
+    example_models: list
+) -> tuple:
     client = OpenAI(api_key=api_key)
 
     logged_text = ""
@@ -81,11 +86,27 @@ def identify_optimization_levels(hierarchy_df: pd.DataFrame, sous_famille: str, 
             'std', 
             'obso', 
             'expo',
-            '(acc+pcd)'
+            '(acc+pcd)',
+            'h77',
+            '(su)',
         ]
-        processed_entity_names = [name.split('-')[1].lower() for name in entity_names if '-' in name]
-        processed_entity_names = [name.strip() for name in processed_entity_names if not any(rem in name for rem in strings_to_remove)]
-        processed_entity_names = list(set(processed_entity_names))
+        
+        # Process entity names to remove unwanted substrings
+        processed_entity_names = []
+        for name in entity_names:
+            if '-' in name:
+                # Split the name and take the part after the hyphen
+                name = name.split('-')[1].lower()
+            else:
+                name = name.lower()  # Ensure the name is in lowercase
+            
+            # Remove unwanted substrings
+            for rem in strings_to_remove:
+                name = name.replace(rem, '')
+            
+            processed_entity_names.append(name.strip())  # Strip any leading/trailing whitespace
+
+        processed_entity_names = list(set(processed_entity_names))  # Remove duplicates
         level_name = child_entities.iloc[0]['level_name']
 
         # Skip rejected levels
@@ -151,7 +172,7 @@ def identify_optimization_levels(hierarchy_df: pd.DataFrame, sous_famille: str, 
 
         try:
             response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o",
                 messages=[
                     {
                         "role": "system",

@@ -10,15 +10,16 @@ def evaluate_sub_families(
     model: str
 ) -> pd.DataFrame:
     """
-    Evaluates sub-families in the insights_table to determine if they should be included in the portfolio review.
+    Evaluates sub-families in the insights DataFrame to determine if they should be included in the portfolio review.
 
     Args:
-        insights_df (pd.DataFrame): The insights table containing sub-families and their metrics.
+        insights_df (pd.DataFrame): DataFrame containing sub-families and their metrics.
         api_key (str): OpenAI API key.
-        no_of_categories_to_review (int): The number of sub-families to review.
+        no_of_categories_to_review (int): Number of sub-families to review.
+        model (str): Model name to use for the OpenAI API.
 
     Returns:
-        pd.DataFrame: A DataFrame with sub-families, assessment (Yes/No), and explanations.
+        pd.DataFrame: DataFrame with sub-families, assessment (Yes/No), and explanations.
     """
     
     client = OpenAI(api_key=api_key)
@@ -81,8 +82,8 @@ def create_evaluation_prompt(insights_df: pd.DataFrame, no_of_categories_to_revi
     Creates a prompt for the LLM to evaluate all sub-families based on provided metrics.
 
     Args:
-        insights_df (pd.DataFrame): The insights table containing sub-families and their metrics.
-        no_of_categories_to_review (int): The number of sub-families to review.
+        insights_df (pd.DataFrame): DataFrame containing sub-families and their metrics.
+        no_of_categories_to_review (int): Number of sub-families to review.
 
     Returns:
         str: The formatted prompt.
@@ -96,16 +97,16 @@ def create_evaluation_prompt(insights_df: pd.DataFrame, no_of_categories_to_revi
     metrics_str = "\n\n".join(metrics_list)
 
     metrics_context = """
-    - **Total Net Revenue**: The higher this value, the more important the sub-family is. Low revenue may indicate poor performance compared to others.
-    - **Total Margin**: The higher this value, the more important the sub-family is. A low margin suggests a need for improvement.
-    - **Relative Margin**: A lower relative margin is more critical, indicating that the sub-family may not be performing well compared to others.
-    - **Avg Discount**: A higher average discount indicates more room for improvements in pricing strategy.
-    - **Latest Introduction**: This indicates the last time this sub-family was evaluated. The more this date is in the past, the more urgent the sub-family should be re-evaluated.
-    - **Total SKUs**: A higher number of SKUs indicates more complexity in the sub-family, which can lead to inefficiencies.
-    - **Margin Spread**: A higher margin spread indicates opportunities to shift sales from low-margin products to higher-margin products.
-    - **YoY Margin Change**: A lower year-over-year margin change is critical, suggesting declining performance.
-    - **Number of Models**: A higher number of models indicates more complexity, which can complicate management and performance.
-    - **Margin per Model**: A lower margin per model is worse, indicating inefficiencies in the product line.
+    - **Total Net Revenue**: Higher values indicate more important sub-families. Low revenue may suggest poor performance.
+    - **Total Margin**: Higher values indicate more important sub-families. Low margin suggests a need for improvement.
+    - **Relative Margin**: Lower relative margin is more critical, indicating poor performance compared to others.
+    - **Avg Discount**: Higher average discount indicates room for pricing strategy improvements.
+    - **Latest Introduction**: Indicates the last evaluation time. Older dates suggest urgency for re-evaluation.
+    - **Total SKUs**: Higher SKU count indicates more complexity, leading to inefficiencies.
+    - **Margin Spread**: Higher margin spread indicates opportunities to shift sales to higher-margin products.
+    - **YoY Margin Change**: Lower year-over-year margin change suggests declining performance.
+    - **Number of Models**: Higher model count indicates more complexity, complicating management and performance.
+    - **Margin per Model**: Lower margin per model indicates inefficiencies in the product line.
     """
 
     prompt = f"""
@@ -121,7 +122,11 @@ def create_evaluation_prompt(insights_df: pd.DataFrame, no_of_categories_to_revi
 
     Assign a "Yes" to the "Assessment" only for sub-families that are performing poorly and should be prioritized for evaluation. Sub-families with strong performance metrics should receive a "No".
 
-    Please compile a brief explanation for each sub-family that you have assessed as "Yes", highlighting why you have made this assessment.
+    Instructions for the explanation text:
+    - Please compile a brief explanation for each sub-family that you have assessed as "Yes", highlighting why you have made this assessment.
+    - Double-check the correctness of statements in the explanation. Example: When you say that the sub-family has the lowest margin, make sure that the margin is indeed the lowest. Compare each metric against all other sub-families to ensure accuracy.
+    - Please write a summary instead of a bullet list for the explanation. This will make it easier to read and understand.
+    
 
     Provide your assessment as follows:
     - Sub-Family: [Sub-Family Name]
