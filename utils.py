@@ -203,8 +203,6 @@ def prepare_table_data(
             lambda row: (row['margin_prev_year'] / row['net_revenue_prev_year']) if row['net_revenue_prev_year'] != 0 else 0,
             axis=1
         )
-
-        print("table_data_prev_year", table_data_prev_year)
         
         table_data = pd.merge(
             table_data, 
@@ -340,6 +338,8 @@ def create_or_update_list_item(site_id, list_id, item, id_column, access_token):
         for key, value in item.items()
     }
 
+    print(f"Uploading item: {item[id_column]}")
+
     try:
         # Escape apostrophes in the ID column for the query
         id_filter = item[id_column].replace("'", "''")
@@ -348,8 +348,6 @@ def create_or_update_list_item(site_id, list_id, item, id_column, access_token):
         response = requests.get(graph_api_url, headers=headers, params={
             '$filter': f"fields/{id_column} eq '{id_filter}'"
         })
-
-        print(response.json())
 
         if response.status_code == 200:
             print("Found existing item\n")
@@ -363,9 +361,6 @@ def create_or_update_list_item(site_id, list_id, item, id_column, access_token):
                     key: value for key, value in item.items() if key != id_column
                 }
 
-                # Print request payload for debugging
-                print("Update Payload:", update_payload)
-
                 update_response = requests.patch(
                     f"{graph_api_url}/{existing_item_id}/fields",
                     json=update_payload,
@@ -373,17 +368,15 @@ def create_or_update_list_item(site_id, list_id, item, id_column, access_token):
                 )
 
                 if update_response.status_code == 200:
+                    print(f"Updated item: {item[id_column]}")
                     return existing_item_id
-
-        print("Did not find existing item\n")
 
         # Item doesn't exist, create a new one
         create_payload = {'fields': item}
-        print("Create Payload:", create_payload)
         create_response = requests.post(graph_api_url, json=create_payload, headers=headers)
 
         if create_response.status_code == 201:
-            print("Created new item\n")
+            print(f"Created new item: {item[id_column]}")
             return create_response.json().get('id')
         
         # Debug any error message from creation

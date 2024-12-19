@@ -44,6 +44,8 @@ if 'model_df' not in st.session_state:
     st.session_state.model_df = None
 if 'model_logged_text' not in st.session_state:
     st.session_state.model_logged_text = ""
+if 'project_id' not in st.session_state:
+    st.session_state.project_id = None
 
 st.title("Range Review Demo")
 st.write("Demo workflow for LLM-based range review")
@@ -107,7 +109,6 @@ filtered_sales = sales[
 filtered_master = master[master['product_status'].astype(str).isin(product_status)]
 
 # Filter master data based on type_de_complement
-print("number of principal ids", len(attributes[attributes['value'].isin(type_de_complement)]['material_id'].unique().tolist()))
 type_de_complement_material_ids = attributes[
     (attributes['value'].isin(type_de_complement)) & 
     (attributes['key'] == 'Type de complément')
@@ -615,22 +616,35 @@ st.header("8. Upload Results to Sharepoint List")
 
 access_token = st.text_input("Enter Access Token")
 
-start_upload_button = st.button("Start Upload")
+start_upload_button = st.button("Upload Projects")
+
+categories_to_review_list_id = '9148877c-ce53-421e-aebf-e6dcd60266a3'
+project_list_id = '58cc53df-4e47-413a-9088-ef828aaeb7f8'
+site_id = '89d6ee16-e20e-438e-a93b-81f067e2843b'
 
 if start_upload_button:
+
+    # Initialize session state for projects
+    st.session_state.projects = []
+
     if 'evaluation_results' in st.session_state:
         # Input for maximum number of evaluations
-        results_df = st.session_state.evaluation_results
-
-        # Filter results to keep only rows where 'Assess for Evaluation' is 'Yes'
-        filtered_results_df = results_df[results_df['assessment'] == 'Yes'].copy()
+        results_df = st.session_state.evaluation_results.copy()
 
         # Left join with insights_table from session state
         if 'insights_table' in st.session_state:
             insights_df = st.session_state.insights_table
-            filtered_results_df = filtered_results_df.merge(insights_df, on='name', how='left')
+            results_df = results_df.merge(insights_df, on='name', how='left')
 
-        # Drop the 'Assess for Evaluation' column
+        # Rename columns as specified
+        results_df.rename(columns={
+            'name': 'Title',
+        }, inplace=True)
+
+        # Filter results to keep only rows where 'assessment' is 'Yes'
+        filtered_results_df = results_df[results_df['assessment'] == 'Yes'].copy()
+
+        # Drop the specified columns
         columns_to_drop = [
             'assessment', 
             'Entity Level Name',
@@ -638,30 +652,85 @@ if start_upload_button:
         ]
         filtered_results_df.drop(columns=columns_to_drop, inplace=True)
 
+        # Initialize the progress bar for projects
+        progress_bar_projects = st.progress(0, text="Creating Projects...")
+
+        # First loop: Create projects for filtered results
+        total_projects = len(filtered_results_df)
+        for index, row in filtered_results_df.iterrows():
+            project = {
+                'Title': row['Title'],
+                'summary': row['summary'],
+                'status': "Recommended"
+            }
+            
+            project_id = create_or_update_list_item(site_id, project_list_id, project, 'Title', access_token)
+            if project_id:
+                st.success(f"Project created/updated for {row['Title']} with ID: {project_id}")
+                # Store project info
+                st.session_state.projects.append(project_id)
+            else:
+                st.error(f"Failed to create/update project for {row['Title']}")
+
+            # Update progress bar (ensure value is between 0 and 1)
+            progress_percentage = min(1.0, (index + 1) / total_projects)
+            progress_bar_projects.progress(progress_percentage, text="Creating Projects...")
+
+        st.success("All projects created successfully.")
+
+# Show Upload Categories button only if we have projects
+if st.session_state.projects:
+    project_ids = st.session_state.projects
+    if st.button("Upload Categories"):
+        # Initialize progress bar for categories
+        progress_bar_categories = st.progress(0, text="Uploading Categories...")
+        project_ids_concat = ",".join(project_ids)
+
+        results_df = st.session_state.evaluation_results.copy()
+
+        # Left join with insights_table from session state
+        if 'insights_table' in st.session_state:
+            insights_df = st.session_state.insights_table
+            results_df = results_df.merge(insights_df, on='name', how='left')
+
         # Rename columns as specified
-        filtered_results_df.rename(columns={
+        results_df.rename(columns={
             'name': 'Title',
         }, inplace=True)
 
+        # Drop the specified columns
+        columns_to_drop = [
+            'assessment', 
+            'Entity Level Name',
+            'Entity Level ID',
+        ]
+        results_df.drop(columns=columns_to_drop, inplace=True)
 
-        categories_to_review_list_id = '9148877c-ce53-421e-aebf-e6dcd60266a3'
-        project_list_id = '58cc53df-4e47-413a-9088-ef828aaeb7f8'
-        site_id = '89d6ee16-e20e-438e-a93b-81f067e2843b'
+        # Second loop: Create categories for all results
+        total_categories = len(results_df)
+        for index, row in results_df.iterrows():
+            # Prepare the category item
+            category_item = row.to_dict()
+            category_item['project_id'] = project_ids_concat
 
-        # Initialize the progress bar
-        progress_bar_ch8 = st.progress(0)
+            # Create/update the category
+            category_id = create_or_update_list_item(
+                site_id, 
+                categories_to_review_list_id, 
+                category_item, 
+                'Title', 
+                access_token
+            )
 
-        # Iterate through the results DataFrame
-        for index, row in filtered_results_df.iterrows():
-            item = row.to_dict()
-            id_column = 'Title'
-            print("Uploading item: ", item[id_column]) # Line break added
-            create_or_update_list_item(site_id, categories_to_review_list_id, item, id_column, access_token)
-            print("Uploaded item: ", item)
-            print()
+            if category_id:
+                st.success(f"Category created/updated for {row['Title']}")
+            else:
+                st.error(f"Failed to create/update category for {row['Title']}")
 
-            # Update the progress bar
-            progress_percentage = (index + 1) / len(filtered_results_df)
-            progress_bar_ch8.progress(progress_percentage)
+            # Update progress bar (ensure value is between 0 and 1)
+            progress_percentage = min(1.0, (index + 1) / total_categories)
+            progress_bar_categories.progress(progress_percentage, text="Uploading Categories...")
 
-        st.success("Uploaded results to Sharepoint list successfully.")
+        st.success("All categories uploaded successfully.")
+else:
+    st.info("Create projects first before uploading categories.")
